@@ -34,16 +34,26 @@ metadata {
     attribute "USOC", "string"
     attribute "Uac", "string"
     attribute "Ubat", "string"
-    attribute "energy_tile", "string"
+    attribute "energy_tile_large", "string"
     attribute "connected", "string"
   }
   preferences {
     input name: "logEnable", type: "bool", title: "Enable logging", defaultValue: true, description: ""
+		input name: "battery_ip_address", type: "string", title: "Sonnen battery LAN IP"
+		input("refresh_interval", "enum", title: "How often to refresh the battery data", options: [
+            0:"Do NOT update",
+            1:"1 Minute",
+            5:"5 Minutes",
+            10:"10 Minutes
+            15:"15 Minutes",
+            20:"20 Minutes",
+            45:"45 Minutes",
+          ], required: true, defaultValue:"1")
   }
 }
 def installed(){
   refresh()
-  schedule("0 */1 * ? * *", refresh)
+  if( settings.energy_refresh_interval != "255") schedule("0 */${settings.refresh_interval} * ? * *", refresh)
   if(logEnable) log.info "Driver installed"
 }
 
@@ -52,13 +62,17 @@ def uninstalled() {
   if(logEnable) log.info "Driver uninstalled"
 }
 
-
+def udpated(){
+	unschedule(refresh)
+	if( settings.energy_refresh_interval != "255") schedule("0 */${settings.refresh_interval} * ? * *", refresh)
+	if(logEnable) log.info "Settings updated"
+}
 
 def refresh() {
   int count = 0;
   int maxTries = 3;
   while(count < maxTries){  
-	  def host = "http://192.168.1.45:8080"
+	  def host = battery_ip_address+":8080"
 	  def command = "/api/v1/status"
 	  try {
 		httpGet([uri: "${host}${command}",
@@ -118,18 +132,17 @@ def updateTiles() {
   def current_consumption = device.currentValue("Consumption_W")
   def current_production = device.currentValue("Production_W")
 
-  def energy_tile = "<div><table style='margin: auto'>"
-  energy_tile += "<tr><td>" + (device.currentValue("FlowConsumptionProduction") == "true" ? "<img src=\"https://img.icons8.com/material-sharp/24/000000/left-down2.png\"/>" : "") + "</td><td><img src='https://img.icons8.com/cotton/64/000000/--solar-panels.png'/>" + device.currentValue("Production_W") + "</td><td>" + (device.currentValue("FlowProductionBattery ") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/000000/right-down2.png\"/>" : "") + "</td></tr>"
-  energy_tile += "<tr><td>" + device.currentValue("Consumption_W") + "<img src='https://img.icons8.com/material-outlined/24/000000/cottage.png'/></td><td>" + (device.currentValue("FlowProductionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/000000/long-arrow-down.png\"/>" : "") + (device.currentValue("FlowConsumptionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/000000/long-arrow-left.png\"/>" : "") + "</td><td><img src='https://img.icons8.com/ios-glyphs/30/000000/battery--v1.png'/>" + device.currentValue("Pac_total_W") + "</td></tr>"
-  energy_tile += "<tr><td>" + (device.currentValue("FlowConsumptionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/000000/left-up2.png\"/>" : "" ) + "</td><td><img src='https://img.icons8.com/fluency/48/000000/transmission-tower.png'/>" + device.currentValue("GridFeedIn_W") + "</td><td>" + (device.currentValue("FlowGridBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/000000/right-up2.png\"/>" : "") + "</td></tr>"
-  energy_tile += "</table></div>"
+  def energy_tile_large = "<div><table style='margin: auto'>"
+  energy_tile_large += "<tr><td>" + (device.currentValue("FlowConsumptionProduction") == "true" ? "<img src=\"https://img.icons8.com/material-sharp/24/000000/left-down2.png\"/>" : "") + "</td><td><img src='https://img.icons8.com/cotton/64/000000/--solar-panels.png'/>" + device.currentValue("Production_W") + "</td><td>" + (device.currentValue("FlowProductionBattery ") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/000000/right-down2.png\"/>" : "") + "</td></tr>"
+  energy_tile_large += "<tr><td>" + device.currentValue("Consumption_W") + "<img src='https://img.icons8.com/material-outlined/24/000000/cottage.png'/></td><td>" + (device.currentValue("FlowProductionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/000000/long-arrow-down.png\"/>" : "") + (device.currentValue("FlowConsumptionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/000000/long-arrow-left.png\"/>" : "") + "</td><td><img src='https://img.icons8.com/ios-glyphs/30/000000/battery--v1.png'/>" + device.currentValue("Pac_total_W") + "</td></tr>"
+  energy_tile_large += "<tr><td>" + (device.currentValue("FlowConsumptionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/000000/left-up2.png\"/>" : "" ) + "</td><td><img src='https://img.icons8.com/fluency/48/000000/transmission-tower.png'/>" + device.currentValue("GridFeedIn_W") + "</td><td>" + (device.currentValue("FlowGridBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/000000/right-up2.png\"/>" : "") + "</td></tr>"
+  energy_tile_large += "</table></div>"
 
-  sendEvent(name: "energy_tile", value: energy_tile)
+  sendEvent(name: "energy_tile_large", value: energy_tile_large)
 }
 
 private formatEnergy(energy) {
   if (energy < 1000) return energy + " W"
   if (energy < 1000000) return Math.round((double)(energy / 1000) * 100) / 100 + " kW"
-
   return Math.round((double)(energy / 1000 / 1000) * 100) / 100 + " MW"
 }
