@@ -2,7 +2,7 @@ metadata {
   definition(
     name: "Sonnen Battery",
     namespace: "Sonnen Battery",
-    author: "Ryan Lundell",
+    author: "ke7lvb",
 		importUrl: "https://raw.githubusercontent.com/ke7lvb/sonnen_battery/main/master_sonnen_battery_driver.groovy",
 	){
     capability "PowerSource"
