@@ -54,10 +54,13 @@ metadata {
           ], required: true, defaultValue:"1")
   }
 }
+
+def version(){ return "1.0.0" }
+
 def installed(){
   if(logEnable) log.info "Driver installed"
 	
-	state.version = "1.0.0"
+	state.version = version()
 }
 
 def uninstalled() {
@@ -72,6 +75,7 @@ def updated(){
     refresh()
     schedule("0 */${settings.refresh_interval} * ? * *", refresh)
   }
+  state.version = version()
 }
 
 def refresh() {
