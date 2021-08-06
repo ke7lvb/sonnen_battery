@@ -5,6 +5,10 @@ Programmed for Sonnen Core. Should work with other Sonnen batteries (untested).
 
 Requires only local IP address of your Sonnen battery
 
+Refreshes data up to once per minute
+
+If driver is unable to retrieve update from battery, connected state will change to "false"
+
 Setup Instructions:
 1. Install the driver
 2. Create a virtual device
