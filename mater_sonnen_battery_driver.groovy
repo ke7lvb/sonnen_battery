@@ -63,8 +63,13 @@ def uninstalled() {
   if(logEnable) log.info "Driver uninstalled"
 }
 
-def udpated(){
-	if(logEnable) log.info "updated"
+def updated(){
+  unschedule(refresh)
+  if(logEnable) log.info "Settings updated"
+  if( settings.refresh_interval != "0"){
+    refresh()
+    schedule("0 */${settings.refresh_interval} * ? * *", refresh)
+  }
 }
 
 def refresh() {
@@ -122,9 +127,8 @@ def refresh() {
 		  }
 	  }
 	}
+  
   updateTiles()
-  unschedule(refresh)
-	if( settings.refresh_interval != "0") schedule("0 */${settings.refresh_interval} * ? * *", refresh)
 }
 
 def updateTiles() {
