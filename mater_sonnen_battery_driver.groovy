@@ -2,7 +2,9 @@ metadata {
   definition(
     name: "Sonnen Battery",
     namespace: "Sonnen Battery",
-    author: "Ryan Lundell") {
+    author: "Ryan Lundell",
+		importUrl: "https://raw.githubusercontent.com/funzie19/hubitat-solaredge/master/solaredge-driver.groovy",
+	){
     capability "PowerSource"
     capability "PowerMeter"
     capability "Battery"
