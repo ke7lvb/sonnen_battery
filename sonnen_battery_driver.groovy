@@ -56,6 +56,8 @@ metadata {
 }
 def installed(){
   if(logEnable) log.info "Driver installed"
+	
+	state.version = "1.0.0"
 }
 
 def uninstalled() {
