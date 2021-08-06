@@ -11,3 +11,9 @@ Setup Instructions:
 3. Assign the Sonnen Battery driver
 4. Enter your battery IP (https://find-my.sonnen-batterie.com/)
 5. Click Refresh to intiate refresh interval
+
+Energy Flow Diagram
+1. Add a new tile to your Dashboard
+2. Select your virtual battery device
+3. Choose the Attribute template
+4. Pick the flow_tile attribute
