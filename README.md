@@ -3,7 +3,7 @@ Hubitat Driver for Sonnen Battery
 
 Simple driver to retrieve the current status of your Sonnen Battery
 
-Programmed for Sonnen Core. Should work with other models (untested).
+Programmed for Sonnen Core. Should work with other models.
 
 Requires only local IP address of your Sonnen battery
 
