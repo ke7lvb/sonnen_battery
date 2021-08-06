@@ -2,8 +2,8 @@ metadata {
   definition(
     name: "Sonnen Battery",
     namespace: "Sonnen Battery",
-    author: "ke7lvb",
-		importUrl: "https://raw.githubusercontent.com/ke7lvb/sonnen_battery/main/sonnen_battery_driver.groovy",
+    author: "Ryan Lundell",
+		importUrl: "https://raw.githubusercontent.com/ke7lvb/sonnen_battery/main/master_sonnen_battery_driver.groovy",
 	){
     capability "PowerSource"
     capability "PowerMeter"
@@ -137,9 +137,9 @@ def updateTiles() {
 
   def flow_tile_large = "<div><table style='margin: auto'>"
   flow_tile_large += "<tr><td></td><td></td><td>" + device.currentValue("Production_W") + "</td><td></td><td></td></tr>"
-  flow_tile_large += "<tr><td></td><td>" + (device.currentValue("FlowConsumptionProduction") == "true" ? "<img src=\"https://img.icons8.com/material-sharp/24/26e07f/left-down2.png\"/>" : "") + "</td><td><img src=\"https://img.icons8.com/material-outlined/24/4a90e2/sun--v1.png\"/></td><td>" + (device.currentValue("FlowProductionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/26e07f/right-down2.png\"/>" : "") + "</td><td></td></tr>"
-  flow_tile_large += "<tr><td>" + device.currentValue("Consumption_W") + "</td><td><img src='https://img.icons8.com/material-outlined/24/4a90e2/cottage.png'/></td><td>" + (device.currentValue("FlowProductionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/26e07f/long-arrow-down.png\"/>" : "") + (device.currentValue("FlowConsumptionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/4a90e2/long-arrow-left.png\"/>" : "") + "</td><td><img src='https://img.icons8.com/ios-glyphs/30/4a90e2/battery--v1.png'/></td><td>" + device.currentValue("Pac_total_W") + "</td></tr>"
-  flow_tile_large += "<tr><td></td><td>" + (device.currentValue("FlowConsumptionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/left-up2.png\"/>" : "" ) + "</td><td><img src=\"https://img.icons8.com/ios-glyphs/30/4a90e2/transmission-tower.png\"/></td><td>" + (device.currentValue("FlowGridBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/right-up2.png\"/>" : "") + "</td><td></td></tr>"
+  flow_tile_large += "<tr><td></td><td>" + (device.currentValue("FlowConsumptionProduction") == "true" ? "<img src=\"https://img.icons8.com/material-sharp/48/26e07f/left-down2.png\"/>" : "") + "</td><td><img src=\"https://img.icons8.com/material-outlined/48/4a90e2/sun--v1.png\"/></td><td>" + (device.currentValue("FlowProductionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/48/26e07f/right-down2.png\"/>" : "") + "</td><td></td></tr>"
+  flow_tile_large += "<tr><td>" + device.currentValue("Consumption_W") + "</td><td><img src='https://img.icons8.com/material-outlined/48/4a90e2/cottage.png'/></td><td>" + (device.currentValue("FlowProductionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/48/26e07f/long-arrow-down.png\"/>" : "") + (device.currentValue("FlowConsumptionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/48/4a90e2/long-arrow-left.png\"/>" : "") + "</td><td><img src='https://img.icons8.com/ios-glyphs/48/4a90e2/battery--v1.png'/></td><td>" + device.currentValue("Pac_total_W") + "</td></tr>"
+  flow_tile_large += "<tr><td></td><td>" + (device.currentValue("FlowConsumptionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/48/fa314a/left-up2.png\"/>" : "" ) + "</td><td><img src=\"https://img.icons8.com/ios/48/4a90e2/transmission-tower.png\"/></td><td>" + (device.currentValue("FlowGridBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/48/fa314a/right-up2.png\"/>" : "") + "</td><td></td></tr>"
   flow_tile_large += "<tr><td></td><td></td><td>" + device.currentValue("GridFeedIn_W") + "</td><td></td><td></td></tr>"
   flow_tile_large += "</table></div>"
 
@@ -147,8 +147,8 @@ def updateTiles() {
   
   def flow_tile_small = "<div><table style='margin: auto'>"
   flow_tile_small += "<tr><td>" + (device.currentValue("FlowConsumptionProduction") == "true" ? "<img src=\"https://img.icons8.com/material-sharp/24/26e07f/left-down2.png\"/>" : "") + "</td><td><img src=\"https://img.icons8.com/material-outlined/24/4a90e2/sun--v1.png\"/></td><td>" + (device.currentValue("FlowProductionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/26e07f/right-down2.png\"/>" : "") + "</td></tr>"
-  flow_tile_small += "<tr><td><img src='https://img.icons8.com/material-outlined/24/4a90e2/cottage.png'/></td><td>" + (device.currentValue("FlowProductionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/26e07f/long-arrow-down.png\"/>" : "") + (device.currentValue("FlowConsumptionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/4a90e2/long-arrow-left.png\"/>" : "") + "</td><td><img src='https://img.icons8.com/ios-glyphs/30/4a90e2/battery--v1.png'/></td></tr>"
-  flow_tile_small += "<tr><td>" + (device.currentValue("FlowConsumptionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/left-up2.png\"/>" : "" ) + "</td><td><img src=\"https://img.icons8.com/ios-glyphs/30/4a90e2/transmission-tower.png\"/></td><td>" + (device.currentValue("FlowGridBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/right-up2.png\"/>" : "") + "</td></tr>"
+  flow_tile_small += "<tr><td><img src='https://img.icons8.com/material-outlined/24/4a90e2/cottage.png'/></td><td>" + (device.currentValue("FlowProductionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/26e07f/long-arrow-down.png\"/>" : "") + (device.currentValue("FlowConsumptionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/4a90e2/long-arrow-left.png\"/>" : "") + "</td><td><img src='https://img.icons8.com/ios-glyphs/24/4a90e2/battery--v1.png'/></td></tr>"
+  flow_tile_small += "<tr><td>" + (device.currentValue("FlowConsumptionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/left-up2.png\"/>" : "" ) + "</td><td><img src=\"https://img.icons8.com/ios/30/4a90e2/transmission-tower.png\"/></td><td>" + (device.currentValue("FlowGridBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/right-up2.png\"/>" : "") + "</td></tr>"
   flow_tile_small += "</table></div>"
 
   sendEvent(name: "flow_tile_small", value: flow_tile_small)
