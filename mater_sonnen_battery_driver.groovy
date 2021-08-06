@@ -46,7 +46,7 @@ metadata {
             0:"Do NOT update",
             1:"1 Minute",
             5:"5 Minutes",
-            10:"10 Minutes
+            10:"10 Minutes",
             15:"15 Minutes",
             20:"20 Minutes",
             45:"45 Minutes",
