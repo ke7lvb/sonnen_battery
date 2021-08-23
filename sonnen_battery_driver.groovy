@@ -55,7 +55,7 @@ metadata {
   }
 }
 
-def version(){ return "1.0.0" }
+def version(){ return "1.0.2" }
 
 def installed(){
   if(logEnable) log.info "Driver installed"
@@ -86,7 +86,7 @@ def refresh() {
 	  def command = "/api/v1/status"
 	  try {
 		httpGet([uri: "${host}${command}",
-				 timeout: 5
+				 timeout: 30
 				]) {
 		  resp -> def respData = resp.data
 		  sendEvent(name: "BackupBuffer", value: respData.BackupBuffer + "%")
