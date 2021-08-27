@@ -55,7 +55,7 @@ metadata {
   }
 }
 
-def version(){ return "1.0.2" }
+def version(){ return "1.0.3" }
 
 def installed(){
   if(logEnable) log.info "Driver installed"
@@ -154,7 +154,7 @@ def updateTiles() {
   def flow_tile_small = "<div><table style='margin: auto'>"
   flow_tile_small += "<tr><td>" + (device.currentValue("FlowConsumptionProduction") == "true" ? "<img src=\"https://img.icons8.com/material-sharp/24/26e07f/left-down2.png\"/>" : "") + "</td><td><img src=\"https://img.icons8.com/material-outlined/24/4a90e2/sun--v1.png\"/></td><td>" + (device.currentValue("FlowProductionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/26e07f/right-down2.png\"/>" : "") + "</td></tr>"
   flow_tile_small += "<tr><td><img src='https://img.icons8.com/material-outlined/24/4a90e2/cottage.png'/></td><td>" + (device.currentValue("FlowProductionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/26e07f/long-arrow-down.png\"/>" : "") + (device.currentValue("FlowConsumptionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-rounded/24/26e07f/long-arrow-left.png\"/>" : "") + "</td><td><img src='https://img.icons8.com/ios-glyphs/24/4a90e2/battery--v1.png'/></td></tr>"
-  flow_tile_small += "<tr><td>" + (device.currentValue("FlowConsumptionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/left-up2.png\"/>" : "" ) + "</td><td><img src=\"https://img.icons8.com/ios/30/4a90e2/transmission-tower.png\"/></td><td>" + (device.currentValue("FlowGridBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/right-up2.png\"/>" : "") + "</td></tr>"
+  flow_tile_small += "<tr><td>" + (device.currentValue("FlowConsumptionGrid") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/left-up2.png\"/>" : "" ) + "</td><td><img src=\"https://img.icons8.com/ios/30/4a90e2/transmission-tower.png\"/></td><td>" + ((device.currentValue("FlowGridBattery") == "true" && device.currentValue("BatteryCharging" == "true") ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/right-up2.png\"/>" : "") + ((device.currentValue("FlowGridBattery") == "true" && device.currentValue("BatteryDischarging" == "true") ? "<img src=\"https://img.icons8.com/material-outlined/24/4a90e2/down-left2.png\"/>" : "") +  "</td></tr>"
   flow_tile_small += "</table></div>"
 
   sendEvent(name: "flow_tile_small", value: flow_tile_small)
