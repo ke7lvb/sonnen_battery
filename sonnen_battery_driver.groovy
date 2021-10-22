@@ -11,6 +11,7 @@ metadata {
     capability "EnergyMeter"
     capability "VoltageMeasurement"
     capability "Refresh"
+    command "updateTiles"
 
     attribute "BackupBuffer", "number"
     attribute "BatteryCharging", "string"
@@ -56,7 +57,7 @@ metadata {
   }
 }
 
-def version(){ return "1.0.4" }
+def version(){ return "1.0.5" }
 
 def installed(){
   if(logEnable) log.info "Driver installed"
@@ -138,14 +139,12 @@ def refresh() {
 		  }
 	  }
 	}
-  
+  pauseExecution(500)
   updateTiles()
 }
 
 def updateTiles() {
-  def current_consumption = device.currentValue("Consumption_W")
-  def current_production = device.currentValue("Production_W")
-
+  
   def flow_tile_large = "<div><table style='margin: auto'>"
   flow_tile_large += "<tr><td></td><td></td><td>" + formatEnergy(device.currentValue("Production_W")) + "</td><td></td><td></td></tr>"
   flow_tile_large += "<tr><td></td><td>" + (device.currentValue("FlowConsumptionProduction") == "true" ? "<img src=\"https://img.icons8.com/material-sharp/48/26e07f/left-down2.png\"/>" : "") + "</td><td><img src=\"https://img.icons8.com/material-outlined/48/4a90e2/sun--v1.png\"/></td><td>" + (device.currentValue("FlowProductionBattery") == "true" ? "<img src=\"https://img.icons8.com/material-outlined/48/26e07f/right-down2.png\"/>" : "") + "</td><td></td></tr>"
