@@ -1,7 +1,7 @@
 metadata {
 	definition(
 name: "Sonnen Battery",
-namespace: "Sonnen Battery",
+namespace: "ke7lvb",
 author: "Ryan Lundell",
 importUrl: "https://raw.githubusercontent.com/ke7lvb/sonnen_battery/main/sonnen_battery_driver.groovy",
 	){
@@ -13,12 +13,12 @@ importUrl: "https://raw.githubusercontent.com/ke7lvb/sonnen_battery/main/sonnen_
 		capability "Refresh"
 		
 		command "updateTiles"
-		command "batteryChargeRate", [[name: "Set Battery Charge Rate", type: "NUMBER"]]
-		command "batteryDischargeRate", [[name: "Set Battery Discharge Rate", type: "NUMBER"]]
+		command "batteryChargeRate", [[name: "Set Battery Charge Rate*", type: "NUMBER"]]
+		command "batteryDischargeRate", [[name: "Set Battery Discharge Rate*", type: "NUMBER"]]
 
 		attribute "BackupBuffer", "number"
-		//attribute "BatteryCharging", "string"
-		//attribute "BatteryDischarging", "string"
+		attribute "BatteryCharging", "string"
+		attribute "BatteryDischarging", "string"
 		//attribute "Consumption_Avg", "number"
 		attribute "Consumption_W", "number"
 		//attribute "Fac", "number"
@@ -42,7 +42,7 @@ importUrl: "https://raw.githubusercontent.com/ke7lvb/sonnen_battery/main/sonnen_
 		//attribute "Ubat", "number"
 		attribute "flow_tile_large", "string"
 		attribute "flow_tile_small", "string"
-		//attribute "connected", "string"
+		//attribute "lanConnected", "string"
 	}
 	preferences {
 		input name: "logEnable", type: "bool", title: "Enable logging", defaultValue: true, description: ""
@@ -60,7 +60,7 @@ importUrl: "https://raw.githubusercontent.com/ke7lvb/sonnen_battery/main/sonnen_
 	}
 }
 
-def version(){ return "1.1.3" }
+def version(){ return "1.1.4" }
 
 def installed(){
 	if(logEnable) log.info "Driver installed"
@@ -101,7 +101,9 @@ def refresh() {
 				state.BackupBuffer = respData.BackupBuffer
                 sendEvent(name: "BackupBuffer", value: state.BackupBuffer)
 				state.BatteryCharging = respData.BatteryCharging
+                sendEvent(name: "BatteryCharging", value: state.BatteryCharging)
 				state.BatteryDischarging = respData.BatteryDischarging
+                sendEvent(name: "BatteryDischarging", value: state.BatteryDischarging)
 				state.Consumption_Avg = respData.Consumption_Avg
 				state.Consumption_W = respData.Consumption_W
                 sendEvent(name: "Consumption_W", value: state.Consumption_W)
@@ -136,7 +138,7 @@ def refresh() {
 				sendEvent(name: "frequency", value: state.frequency)
 				state.powerSource =  (respData.FlowConsumptionBattery == true ? "battery" : "mains")
                 sendEvent(name: "powerSource", value: state.powerSource)
-				state.connected = true
+				state.lanConnected = true
 				if(logEnable) log.info respData
 			}
 			count = maxTries
@@ -146,7 +148,7 @@ def refresh() {
 			if(logEnable) log.warn "$count attempt to connect failed: $e"
 			if (count >= maxTries) {
 				if(logEnable) log.error "Max retries exceeded"
-				state.connected = false
+				state.lanConnected = false
 			}
 		}
 	}
