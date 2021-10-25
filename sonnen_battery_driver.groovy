@@ -9,7 +9,7 @@ importUrl: "https://raw.githubusercontent.com/ke7lvb/sonnen_battery/main/sonnen_
 		capability "PowerMeter"
 		capability "Battery"
 		capability "VoltageMeasurement"
-        capability "Actuator"
+        	capability "Actuator"
 		capability "Refresh"
 		
 		command "updateTiles"
