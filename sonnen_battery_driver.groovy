@@ -39,7 +39,7 @@ metadata {
     attribute "Production_W", "number"
     //attribute "RSOC", "number"
     //attribute "RemainingCapacity_W", "number"
-    //attribute "SystemStatus", "string"
+    attribute "SystemStatus", "string"
     //attribute "Timestamp", "string"
     //attribute "USOC", "number"
     //attribute "Uac", "number"
@@ -65,7 +65,7 @@ metadata {
 }
 
 def version() {
-  return "1.1.4"
+  return "1.1.5"
 }
 
 def installed() {
@@ -80,15 +80,16 @@ def uninstalled() {
 }
 
 def updated() {
-  unschedule(refresh)
   if (logEnable) log.info "Settings updated"
   if (settings.refresh_interval != "0") {
-    refresh()
+    //refresh()
     if (settings.refresh_interval == "30") {
-      schedule("15/${settings.refresh_interval} * * * * ? *", refresh)
+      schedule("28/${settings.refresh_interval} * * * * ? *", refresh, [overwrite: true])
     } else {
-      schedule("15 */${settings.refresh_interval} * ? * *", refresh)
+      schedule("28 */${settings.refresh_interval} * ? * *", refresh, [overwrite: true])
     }
+  }else{
+    unschedule(refresh)
   }
   state.version = version()
 }
@@ -130,6 +131,7 @@ def refresh() {
         state.RSOC = respData.RSOC
         state.RemainingCapacity_W = respData.RemainingCapacity_W
         state.SystemStatus = respData.SystemStatus
+        sendEvent(name: "SystemStatus", value: state.SystemStatus)
         state.Timestamp = respData.Timestamp
         state.USOC = respData.USOC
         state.Uac = respData.Uac
@@ -190,8 +192,7 @@ def batteryChargeRate(rate) {
     if (logEnable) log.info "${host}${command}${rate}"
     if (logEnable) log.info respData
   }
-  pauseExecution(8000)
-  refresh()
+  runIn(6, 'refresh', [overwrite: true])
 }
 
 def batteryDischargeRate(rate) {
@@ -202,8 +203,7 @@ def batteryDischargeRate(rate) {
     if (logEnable) log.info "${host}${command}${rate}"
     if (logEnable) log.info respData
   }
-  pauseExecution(8000)
-  refresh()
+  runIn(6, 'refresh', [overwrite: true])
 }
 
 private formatEnergy(energy) {
