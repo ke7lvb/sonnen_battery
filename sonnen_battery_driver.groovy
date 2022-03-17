@@ -51,21 +51,24 @@ metadata {
   preferences {
     input name: "logEnable", type: "bool", title: "Enable logging", defaultValue: true, description: ""
     input name: "battery_ip_address", type: "string", title: "Sonnen battery LAN IP", description: "example: 192.168.0.2", required: true
-    input("refresh_interval", "enum", title: "How often to refresh the battery data", options: [
-      0: "Do NOT update",
-      30: "30 seconds",
-      1: "1 Minute",
-      5: "5 Minutes",
-      10: "10 Minutes",
-      15: "15 Minutes",
-      20: "20 Minutes",
-      45: "45 Minutes",
-    ], required: true, defaultValue: "1")
+    input("refresh_interval", "enum", title: "How often to refresh the battery data (minutes)", required: true, defaultValue: "0", options: [
+		0: "Do NOT update",
+		10: "Every 10 seconds / 10 minutes / 4 hours",
+		15: "Every 15 seconds / 15 minutes / 6 hours",
+		20: "Every 20 seconds / 20 minutes / 8 hours",
+		30: "Every 30 seconds / 30 minutes / 12 hours",
+		1: "Every 60 seconds / 60 minutes / 24 hours"
+	])
+    input("refresh_interval_unit", "enum", title: "Refresh Interval Unit", required: true, defaultValue: "1", options: [
+		1: "Seconds",
+		2: "Minutes",
+		3: "Hours"
+	])
   }
 }
 
 def version() {
-  return "1.1.5"
+  return "1.1.6"
 }
 
 def installed() {
@@ -82,14 +85,40 @@ def uninstalled() {
 def updated() {
   if (logEnable) log.info "Settings updated"
   if (settings.refresh_interval != "0") {
-    //refresh()
-    if (settings.refresh_interval == "30") {
-      schedule("28/${settings.refresh_interval} * * * * ? *", refresh, [overwrite: true])
-    } else {
-      schedule("28 */${settings.refresh_interval} * ? * *", refresh, [overwrite: true])
-    }
+	  if(settings.refresh_interval_unit == "1"){
+		  //every minute
+		  if(settings.refresh_interval == "1"){
+			schedule("13 */${settings.refresh_interval} * ? * * *", refresh, [overwrite: true])
+		  	if (logEnable) log.info "Job scheduled 13 */${settings.refresh_interval} * ? * * *"
+		  }else{
+			//every x seconds
+		  	schedule("3/${settings.refresh_interval} * * ? * * *", refresh, [overwrite: true])
+		  	if (logEnable) log.info "Job scheduled 3/${settings.refresh_interval} * * ? * * *"
+		  }
+	  }else if(settings.refresh_interval_unit == "2"){
+		  //every hour
+		  if(settings.refresh_interval == "1"){
+			schedule("13 1 */${settings.refresh_interval} ? * * *", refresh, [overwrite: true])
+		  	if (logEnable) log.info "Job scheduled 13 1 */${settings.refresh_interval} ? * * *"
+		  }else{
+			//every x minutes
+		  	schedule("13 */${settings.refresh_interval} * ? * * *", refresh, [overwrite: true])
+		  	if (logEnable) log.info "Job scheduled 13 */${settings.refresh_interval} * ? * * *"
+		  }
+	  }else{
+		  //every day
+		  if(settings.refresh_interval == "1"){
+			schedule("13 1 12  ? * * *", refresh, [overwrite: true])
+		  	if (logEnable) log.info "Job scheduled 13 1 12 ? * * *"
+		  }else{
+			//every x hours
+		  	schedule("13 1 */${settings.refresh_interval} ? * * *", refresh, [overwrite: true])
+		  	if (logEnable) log.info "Job scheduled 13 1 */${settings.refresh_interval} ? * * *"
+		  }
+	  }
   }else{
     unschedule(refresh)
+    if (logEnable) log.info "Removed scheduled job"
   }
   state.version = version()
 }
@@ -98,8 +127,8 @@ def refresh() {
   int count = 0;
   int maxTries = 3;
   while (count < maxTries) {
-    def host = "http://" + battery_ip_address + ":8080"
-    def command = "/api/v1/status"
+    def host = "http://" + battery_ip_address
+    def command = "/api/v2/status"
     try {
       httpGet([uri: "${host}${command}",
         timeout: 30
@@ -192,7 +221,7 @@ def batteryChargeRate(rate) {
     if (logEnable) log.info "${host}${command}${rate}"
     if (logEnable) log.info respData
   }
-  runIn(6, 'refresh', [overwrite: true])
+  //runIn(6, 'refresh', [overwrite: true])
 }
 
 def batteryDischargeRate(rate) {
@@ -203,7 +232,7 @@ def batteryDischargeRate(rate) {
     if (logEnable) log.info "${host}${command}${rate}"
     if (logEnable) log.info respData
   }
-  runIn(6, 'refresh', [overwrite: true])
+  //runIn(6, 'refresh', [overwrite: true])
 }
 
 private formatEnergy(energy) {
