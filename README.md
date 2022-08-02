@@ -22,4 +22,4 @@ Requires only local IP address of your Sonnen battery
 4. Pick the flow_tile attribute
 
 
-The tool can make calls to change the charge/discharge rate of the battery (uses the v1 API at the moment). In my experience, these changes last about 30 seconds before normal function resumes.
+The tool can make calls to change the charge/discharge rate of the battery (uses the v1 API at the moment). In my experience, these changes last about 30 seconds before normal function resumes if the battery is set to auto mode. In manual mode the changes remain in effect until another API call is made.
