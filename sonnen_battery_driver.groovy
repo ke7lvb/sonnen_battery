@@ -15,7 +15,7 @@ metadata {
 
         attribute "energy", "number"
 
-        command "updateTiles"
+        if(flowTiles) command "updateTiles"
         command "batteryChargeRate", [
             [name: "Set Battery Charge Rate*", type: "NUMBER"]
         ]
@@ -47,8 +47,10 @@ metadata {
         //attribute "USOC", "number"
         //attribute "Uac", "number"
         //attribute "Ubat", "number"
-        attribute "flow_tile_large", "string"
-        attribute "flow_tile_small", "string"
+        if(flowTiles){
+            attribute "flow_tile_large", "string"
+            attribute "flow_tile_small", "string"
+        }
         //attribute "lanConnected", "string"
     }
     preferences {
@@ -67,11 +69,13 @@ metadata {
             2: "Minutes",
             3: "Hours"
         ])
+        input name: "flowTiles", type: "bool", title: "Display Flow Tiles", description: "Reduce hub load by not generating the flow tiles", defaultValue: true
+        input name: "enableChildDevices", type: "bool", title: "Enable Child Devices", defaultValue: false, description: "If you would like individual devices for different power readings"
     }
 }
 
 def version() {
-    return "1.1.7"
+    return "1.2.1"
 }
 
 def installed() {
@@ -132,6 +136,7 @@ def refresh() {
     while (count < maxTries) {
         def host = "http://" + battery_ip_address
         def command = "/api/v2/status"
+        if(logEnable) log.info "URL: ${host}${command}"
         try {
             httpGet([uri: "${host}${command}",
                      timeout: 30
@@ -195,7 +200,48 @@ def refresh() {
             }
         }
     }
-    updateTiles()
+    
+    if(flowTiles){
+        updateTiles()
+    }
+    
+    if(enableChildDevices){
+        def totalProduction = getChildDevice("Sonnen Total Production")
+        if (!totalProduction) {
+            totalProduction = addChildDevice("hubitat", "Generic Component Energy Meter", "Sonnen Total Production", [name: "Sonnen Total Production", isComponent: false])
+        }
+        totalProduction.parse([[name: "energy", value: (state.Production_W / 1000)]])
+        
+        def totalConsumption = getChildDevice("Sonnen Total Consumption")
+        if (!totalConsumption) {
+            totalConsumption = addChildDevice("hubitat", "Generic Component Energy Meter", "Sonnen Total Consumption", [name: "Sonnen Total Consumption", isComponent: false])
+        }
+        totalConsumption.parse([[name: "energy", value: (state.Consumption_W / 1000)]])
+        
+        def energyToGrid = getChildDevice("Sonnen Energy to Grid")
+        if (!energyToGrid) {
+            energyToGrid = addChildDevice("hubitat", "Generic Component Energy Meter", "Sonnen Energy to Grid", [name: "Sonnen Energy to Grid", isComponent: false])
+        }
+        energyToGrid.parse([[name: "energy", value: convertEnergy(state.GridFeedIn_W / 1000)]])
+        
+        def energyFromoGrid = getChildDevice("Sonnen Energy from Grid")
+        if (!energyFromoGrid) {
+            energyFromoGrid = addChildDevice("hubitat", "Generic Component Energy Meter", "Sonnen Energy from Grid", [name: "Sonnen Energy from Grid", isComponent: false])
+        }
+        energyFromoGrid.parse([[name: "energy", value: convertEnergy(state.GridFeedIn_W / 1000 * -1)]])
+        
+        def energyFromBattery = getChildDevice("Sonnen Energy from Battery")
+        if (!energyFromBattery) {
+            energyFromBattery = addChildDevice("hubitat", "Generic Component Energy Meter", "Sonnen Energy from Battery", [name: "Sonnen Energy from Battery", isComponent: false])
+        }
+        energyFromBattery.parse([[name: "energy", value: convertEnergy(state.Pac_total_W / 1000)]])
+        
+        def energyToBattery = getChildDevice("Sonnen Energy to Battery")
+        if (!energyToBattery) {
+            energyToBattery = addChildDevice("hubitat", "Generic Component Energy Meter", "Sonnen Energy to Battery", [name: "Sonnen Energy to Battery", isComponent: false])
+        }
+        energyToBattery.parse([[name: "energy", value: convertEnergy(state.Pac_total_W / 1000 * -1)]])
+    }
 }
 
 def updateTiles() {
@@ -217,7 +263,7 @@ def updateTiles() {
     flow_tile_large += "<tr><td></td><td></td><td>" + formatEnergy(state.GridFeedIn_W) + "</td><td></td><td></td></tr>"
     flow_tile_large += "</table></div>"
 
-    sendEvent(name: "flow_tile_large", value: flow_tile_large)
+    sendEvent(name: "flow_tile_large", value: "${flow_tile_large}")
 
     def flow_tile_small = "<div><table style='margin: auto'>"
     flow_tile_small += "<tr><td>" + (state.FlowConsumptionProduction == true ? "<img src=\"https://img.icons8.com/material-sharp/24/26e07f/left-down2.png\"/>" : "") + "</td><td><img src=\"https://img.icons8.com/material-outlined/24/4a90e2/sun--v1.png\"/></td><td>" + (state.FlowProductionBattery == true ? "<img src=\"https://img.icons8.com/material-outlined/24/26e07f/right-down2.png\"/>" : "") + "</td></tr>"
@@ -225,7 +271,7 @@ def updateTiles() {
     flow_tile_small += "<tr><td>" + (state.FlowConsumptionGrid == true ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/left-up2.png\"/>" : "") + "</td><td><img src=\"https://img.icons8.com/ios/30/4a90e2/transmission-tower.png\"/></td><td>" + ((state.FlowGridBattery == true && state.BatteryCharging == true) ? "<img src=\"https://img.icons8.com/material-outlined/24/fa314a/right-up2.png\"/>" : "") + ((state.FlowGridBattery == true && state.BatteryDischarging == true) ? "<img src=\"https://img.icons8.com/material-outlined/24/26e07f/down-left.png\"/>" : "") + "</td></tr>"
     flow_tile_small += "</table></div>"
 
-    sendEvent(name: "flow_tile_small", value: flow_tile_small)
+    sendEvent(name: "flow_tile_small", value: "${flow_tile_small}")
 }
 
 def batteryChargeRate(rate) {
@@ -250,8 +296,25 @@ def batteryDischargeRate(rate) {
     //runIn(6, 'refresh', [overwrite: true])
 }
 
+def executeHttpRequest(String uri, String method, Map headers, String body) {
+    try {
+        def response = HTTPHelper.executeHttpRequest(uri: uri, method: method, headers: headers, body: body)
+        return response
+    } catch (Exception e) {
+        log.error("Error executing HTTP request: ${e.message}")
+        return null
+    }
+}
+
+
 private formatEnergy(energy) {
     if (energy < 1000 && energy > -1000) return energy + " W"
     if (energy < 1000000 && energy > -1000000) return Math.round((double)(energy / 1000) * 100) / 100 + " kW"
     return Math.round((double)(energy / 1000 / 1000) * 100) / 100 + " MW"
+}
+
+private convertEnergy(energy) {
+    if (energy < 0)
+      energy = 0
+    return energy
 }
