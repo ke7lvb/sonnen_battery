@@ -47,6 +47,8 @@ metadata {
         //attribute "USOC", "number"
         //attribute "Uac", "number"
         //attribute "Ubat", "number"
+        attribute "TimeToCharge", "number"
+        attribute "TimeToDischarge", "number"
         if(flowTiles){
             attribute "flow_tile_large", "string"
             attribute "flow_tile_small", "string"
@@ -69,13 +71,15 @@ metadata {
             2: "Minutes",
             3: "Hours"
         ])
-        input name: "flowTiles", type: "bool", title: "Display Flow Tiles", description: "Reduce hub load by not generating the flow tiles", defaultValue: true
+        input name: "flowTiles", type: "bool", title: "Display Flow Tiles", description: "html markup showing direction of energy flow", defaultValue: false
         input name: "enableChildDevices", type: "bool", title: "Enable Child Devices", defaultValue: false, description: "If you would like individual devices for different power readings"
+        input name: "batteryCapacity", type: "number", title: "Estimate Battery time to Charge/Discharge hrs", description: "Factors in the backup buffer. Enter your battery total capacity in watt hours. 0 to disable", defaultValue: 0
+
     }
 }
 
 def version() {
-    return "1.2.1"
+    return "1.3.1"
 }
 
 def installed() {
@@ -168,7 +172,7 @@ def refresh() {
                 state.Production_W = respData.Production_W
                 sendEvent(name: "Production_W", value: state.Production_W)
                 state.RSOC = respData.RSOC
-                state.RemainingCapacity_W = respData.RemainingCapacity_W
+                state.RemainingCapacity_W = respData.RemainingCapacity_Wh
                 state.SystemStatus = respData.SystemStatus
                 sendEvent(name: "SystemStatus", value: state.SystemStatus)
                 state.Timestamp = respData.Timestamp
@@ -180,9 +184,9 @@ def refresh() {
                 state.power = (respData.Production_W - respData.Consumption_W)
                 sendEvent(name: "power", value: state.power)
                 sendEvent(name: "energy", value: (state.power / 1000)) 
-                state.voltage = respData.Ubat
-                sendEvent(name: "voltage", value: state.voltage)
-                state.frequency = respData.Fac
+                //state.voltage = respData.Ubat
+                //sendEvent(name: "voltage", value: state.voltage)
+                //state.frequency = respData.Fac
                 //sendEvent(name: "frequency", value: state.frequency)
                 state.powerSource = (respData.FlowConsumptionBattery == true ? "battery" : "mains")
                 sendEvent(name: "powerSource", value: state.powerSource)
@@ -242,6 +246,10 @@ def refresh() {
         }
         energyToBattery.parse([[name: "energy", value: convertEnergy(state.Pac_total_W / 1000 * -1)]])
     }
+    
+    if(batteryCapacity > 0){
+        estimateCharge()
+    }
 }
 
 def updateTiles() {
@@ -272,6 +280,25 @@ def updateTiles() {
     flow_tile_small += "</table></div>"
 
     sendEvent(name: "flow_tile_small", value: "${flow_tile_small}")
+}
+
+def estimateCharge() {
+    def remaining_battery_power = (batteryCapacity * state.USOC.toInteger() / 100) - (batteryCapacity * state.BackupBuffer.toInteger() / 100)
+    def amount_to_charge = (batteryCapacity - ( batteryCapacity * state.USOC.toInteger() /100) )
+    
+    def time_to_charge = 0
+    def time_to_discharge = 0
+    
+    if( state.BatteryCharging ){
+        time_to_charge = (amount_to_charge / state.Pac_total_W.toInteger() * -1 )
+    }
+    if( state.BatteryDischarging ){
+        time_to_discharge = (remaining_battery_power / state.Pac_total_W.toInteger() )
+    }
+    
+    sendEvent(name: "TimeToCharge", value: time_to_charge)
+    sendEvent(name: "TimeToDischarge", value: time_to_discharge)
+    
 }
 
 def batteryChargeRate(rate) {
