@@ -8,7 +8,7 @@ metadata {
         capability "PowerSource"
         capability "PowerMeter"
         capability "Battery"
-        capability "VoltageMeasurement"
+        //capability "VoltageMeasurement"
         capability "Actuator"
         capability "Refresh"
         capability "EnergyMeter"
@@ -16,11 +16,11 @@ metadata {
         attribute "energy", "number"
 
         if(flowTiles) command "updateTiles"
-        command "batteryChargeRate", [
-            [name: "Set Battery Charge Rate*", type: "NUMBER"]
+        command "setBackupBuffer", [
+            [name: "Set Battery Backup Buffer*", type: "NUMBER", description: "Sets the battery backup buffer. Requires an API key to be configured in Preferences"]
         ]
-        command "batteryDischargeRate", [
-            [name: "Set Battery Discharge Rate*", type: "NUMBER"]
+        command "getFullChargeCapacity", [
+        	[name: "Get Battery Full Charge Capacity", type: "", description: "Used to calculate the number of minutes until fully charged/discharged. Requires an API key to be configured in Preferences"]
         ]
 
         attribute "BackupBuffer", "number"
@@ -58,7 +58,7 @@ metadata {
     preferences {
         input name: "logEnable", type: "bool", title: "Enable logging", defaultValue: true, description: ""
         input name: "battery_ip_address", type: "string", title: "Sonnen battery LAN IP", description: "example: 192.168.0.2", required: true
-        input("refresh_interval", "enum", title: "How often to refresh the battery data", required: true, defaultValue: "0", options: [
+        input("refresh_interval", "enum", title: "How often to refresh the battery data. Used in combintation with Refresh Interval Unit.", required: true, defaultValue: "0", options: [
             0: "Do NOT update",
             10: "Every 10 seconds / 10 minutes / 4 hours",
             15: "Every 15 seconds / 15 minutes / 6 hours",
@@ -73,13 +73,12 @@ metadata {
         ])
         input name: "flowTiles", type: "bool", title: "Display Flow Tiles", description: "html markup showing direction of energy flow", defaultValue: false
         input name: "enableChildDevices", type: "bool", title: "Enable Child Devices", defaultValue: false, description: "If you would like individual devices for different power readings"
-        input name: "batteryCapacity", type: "number", title: "Estimate Battery time to Charge/Discharge hrs", description: "Factors in the backup buffer. Enter your battery total capacity in watt hours. 0 to disable", defaultValue: 0
-
+		input name: "apiKey", type: "string", title: "API Key", description: "Required for all actions except Refresh"
     }
 }
 
 def version() {
-    return "1.3.1"
+    return "1.4.1"
 }
 
 def installed() {
@@ -135,26 +134,25 @@ def updated() {
 }
 
 def refresh() {
-    int count = 0;
-    int maxTries = 3;
-    while (count < maxTries) {
-        def host = "http://" + battery_ip_address
-        def command = "/api/v2/status"
-        if(logEnable) log.info "URL: ${host}${command}"
-        try {
-            httpGet([uri: "${host}${command}",
-                     timeout: 30
-                    ]) {
-                resp -> def respData = resp.data
+    def params = [
+        uri: "http://${battery_ip_address}/api/v2/status",
+        contentType: "application/json"
+    ]
+
+    try {
+        httpGet(params) { response ->
+            if (response.status == 200) {
+                def respData = response.data
+                
                 state.BackupBuffer = respData.BackupBuffer
                 sendEvent(name: "BackupBuffer", value: state.BackupBuffer)
+
                 state.BatteryCharging = respData.BatteryCharging
-                //sendEvent(name: "BatteryCharging", value: state.BatteryCharging)
                 state.BatteryDischarging = respData.BatteryDischarging
-                //sendEvent(name: "BatteryDischarging", value: state.BatteryDischarging)
                 state.Consumption_Avg = respData.Consumption_Avg
                 state.Consumption_W = respData.Consumption_W
                 sendEvent(name: "Consumption_W", value: state.Consumption_W)
+
                 state.Fac = respData.Fac
                 state.FlowConsumptionBattery = respData.FlowConsumptionBattery
                 state.FlowConsumptionGrid = respData.FlowConsumptionGrid
@@ -162,48 +160,50 @@ def refresh() {
                 state.FlowGridBattery = respData.FlowGridBattery
                 state.FlowProductionBattery = respData.FlowProductionBattery
                 state.FlowProductionGrid = respData.FlowProductionGrid
+
                 state.GridFeedIn_W = respData.GridFeedIn_W
                 sendEvent(name: "GridFeedIn_W", value: state.GridFeedIn_W)
+
                 state.IsSystemInstalled = respData.IsSystemInstalled
                 state.OperatingMode = respData.OperatingMode
-                //sendEvent(name: "OperatingMode", value: state.OperatingMode)
                 state.Pac_total_W = respData.Pac_total_W
                 sendEvent(name: "Pac_total_W", value: state.Pac_total_W)
+
                 state.Production_W = respData.Production_W
                 sendEvent(name: "Production_W", value: state.Production_W)
+
                 state.RSOC = respData.RSOC
                 state.RemainingCapacity_W = respData.RemainingCapacity_Wh
                 state.SystemStatus = respData.SystemStatus
                 sendEvent(name: "SystemStatus", value: state.SystemStatus)
+
                 state.Timestamp = respData.Timestamp
                 state.USOC = respData.USOC
                 state.Uac = respData.Uac
                 state.Ubat = respData.Ubat
+
                 state.battery = respData.USOC
                 sendEvent(name: "battery", value: state.battery)
+
                 state.power = (respData.Production_W - respData.Consumption_W)
                 sendEvent(name: "power", value: state.power)
-                sendEvent(name: "energy", value: (state.power / 1000)) 
-                //state.voltage = respData.Ubat
-                //sendEvent(name: "voltage", value: state.voltage)
-                //state.frequency = respData.Fac
-                //sendEvent(name: "frequency", value: state.frequency)
-                state.powerSource = (respData.FlowConsumptionBattery == true ? "battery" : "mains")
+                sendEvent(name: "energy", value: (state.power / 1000))
+
+                state.powerSource = respData.FlowConsumptionBattery ? "battery" : "mains"
                 sendEvent(name: "powerSource", value: state.powerSource)
+
                 state.lanConnected = true
                 if (logEnable) log.info respData
-            }
-            count = maxTries
-
-        } catch (e) {
-            ++count
-            if (logEnable) log.warn "$count attempt to connect failed: $e"
-            if (count >= maxTries) {
-                if (logEnable) log.error "Max retries exceeded"
+            } else {
+                log.error "Failed to retrieve system status. Status: ${response.status}"
                 state.lanConnected = false
             }
         }
+    } catch (Exception e) {
+        log.error "Error fetching system status: ${e.message}"
+        state.lanConnected = false
     }
+
     
     if(flowTiles){
         updateTiles()
@@ -247,9 +247,10 @@ def refresh() {
         energyToBattery.parse([[name: "energy", value: convertEnergy(state.Pac_total_W / 1000 * -1)]])
     }
     
-    if(batteryCapacity > 0){
+    if (state.FullChargeCapacity != null && state.FullChargeCapacity.toString().trim()) {
         estimateCharge()
     }
+
 }
 
 def updateTiles() {
@@ -283,56 +284,81 @@ def updateTiles() {
 }
 
 def estimateCharge() {
-    def remaining_battery_power = (batteryCapacity * state.USOC.toInteger() / 100) - (batteryCapacity * state.BackupBuffer.toInteger() / 100)
-    def amount_to_charge = (batteryCapacity - ( batteryCapacity * state.USOC.toInteger() /100) )
-    
+    def FullChargeCapacity = state.FullChargeCapacity?.toBigDecimal() ?: 0
+    def usoc = state.USOC?.toBigDecimal() ?: 0
+    def pacTotal = state.Pac_total_W?.toBigDecimal() ?: 1  // Avoid division by zero
+
+    def remaining_battery_power = (FullChargeCapacity * usoc / 100) - (FullChargeCapacity * FullChargeCapacity / 100)
+    def amount_to_charge = FullChargeCapacity - (FullChargeCapacity * usoc / 100)
+
     def time_to_charge = 0
     def time_to_discharge = 0
-    
-    if( state.BatteryCharging ){
-        time_to_charge = (amount_to_charge / state.Pac_total_W.toInteger() * -1 )
+
+    if (state.BatteryCharging) {
+        time_to_charge = Math.round((amount_to_charge / pacTotal * -1 * 60))
     }
-    if( state.BatteryDischarging ){
-        time_to_discharge = (remaining_battery_power / state.Pac_total_W.toInteger() )
+    if (state.BatteryDischarging) {
+        time_to_discharge = Math.round((remaining_battery_power / pacTotal * 60))
     }
-    
+
     sendEvent(name: "TimeToCharge", value: time_to_charge)
     sendEvent(name: "TimeToDischarge", value: time_to_discharge)
-    
 }
 
-def batteryChargeRate(rate) {
-    def host = "http://" + battery_ip_address + ":8080"
-    def command = "/api/v1/setpoint/charge/"
-    httpGet([uri: "${host}${command}${rate}"]) {
-        resp -> def respData = resp.data
-        if (logEnable) log.info "${host}${command}${rate}"
-        if (logEnable) log.info respData
-    }
-    //runIn(6, 'refresh', [overwrite: true])
-}
 
-def batteryDischargeRate(rate) {
-    def host = "http://" + battery_ip_address + ":8080"
-    def command = "/api/v1/setpoint/discharge/"
-    httpGet([uri: "${host}${command}${rate}"]) {
-        resp -> def respData = resp.data
-        if (logEnable) log.info "${host}${command}${rate}"
-        if (logEnable) log.info respData
-    }
-    //runIn(6, 'refresh', [overwrite: true])
-}
+def setBackupBuffer(buffer) {
+    def params = [
+        uri: "http://${battery_ip_address}/api/v2/configurations",
+        body: [
+            EM_USOC: buffer
+        ],
+        contentType: "application/json",
+        headers: [
+            'Auth-Token': apiKey
+        ]
+    ]
 
-def executeHttpRequest(String uri, String method, Map headers, String body) {
     try {
-        def response = HTTPHelper.executeHttpRequest(uri: uri, method: method, headers: headers, body: body)
-        return response
+        httpPut(params) { response ->
+            if (response.status == 200) {
+                log.info "Success: ${response.data}"
+            } else {
+                log.error "Failed with status: ${response.status}"
+            }
+        }
     } catch (Exception e) {
-        log.error("Error executing HTTP request: ${e.message}")
-        return null
+        log.error "Error: ${e.message}"
     }
 }
 
+def getFullChargeCapacity() {
+    def params = [
+        uri: "http://${battery_ip_address}/api/v2/latestdata",
+        contentType: "application/json",
+        headers: [
+            'Auth-Token': apiKey
+        ]
+    ]
+    
+    try {
+        httpGet(params) { response ->
+            if (response.status == 200) {
+                def respData = response.data
+                
+                if (respData?.FullChargeCapacity) {
+                    state.FullChargeCapacity = respData.FullChargeCapacity
+                    if (logEnable) log.info "Full Charge Capacity: ${state.FullChargeCapacity}"
+                } else {
+                    log.warn "FullChargeCapacity key not found in API response."
+                }
+            } else {
+                log.error "Failed with status: ${response.status}"
+            }
+        }
+    } catch (Exception e) {
+        log.error "Error fetching charge capacity: ${e.message}"
+    }
+}
 
 private formatEnergy(energy) {
     if (energy < 1000 && energy > -1000) return energy + " W"
