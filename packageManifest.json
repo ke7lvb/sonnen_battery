@@ -1,0 +1,16 @@
+{
+  "packageName": "Sonnen Battery - Hubitat",
+  "author": "ke7lvb",
+  "version": "1.4.1",
+  "minimumHEVersion": "2.1.9",
+  "dateReleased": "2021-08-06",
+  "drivers": [
+    {
+      "id": "6b3818d2-673c-456c-a70e-db4110f4ee04",
+      "name": "Sonnen Battery",
+      "namespace": "ke7lvb",
+      "location": "https://raw.githubusercontent.com/ke7lvb/sonnen_battery/refs/heads/main/sonnen_battery_driver.groovy",
+      "required": true
+    }
+  ]
+}
