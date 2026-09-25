@@ -1,5 +1,3 @@
-import groovy.json.JsonSlurper
-
 metadata {
     definition(
         name: "Sonnen Battery (Optimized Polling)",
@@ -62,12 +60,12 @@ metadata {
 
 def installed() {
     if (logEnable) log.info "Driver installed"
-    state.version = "1.5.0"
+    state.version = "1.6.0"
 }
 
 def updated() {
     if (logEnable) log.info "Settings updated"
-    unschedule(refresh)
+    unschedule()
 
     if (settings.refresh_interval != "0") {
         scheduleRefreshJob()
@@ -75,7 +73,13 @@ def updated() {
         if (logEnable) log.info "Polling disabled"
     }
 
-    state.version = "1.5.0"
+    refreshCapacity()
+
+    state.remove("USOC")
+    state.remove("BatteryCharging")
+    state.remove("BatteryDischarging")
+    state.remove("FlowGridBattery")
+    state.version = "1.6.0"
 }
 
 def scheduleRefreshJob() {
@@ -106,89 +110,91 @@ def scheduleRefreshJob() {
 }
 
 /* ---------------------------------------------------------
-   MAIN REFRESH — ALWAYS CALL BOTH ENDPOINTS
+   MAIN REFRESH — /status ONLY (async, no API key needed)
 --------------------------------------------------------- */
 def refresh() {
-
-    // -----------------------------
-    // 1. GET /latestdata (requires API key)
-    // -----------------------------
-    def latestParams = [
-        uri: "http://${battery_ip_address}/api/v2/latestdata",
-        contentType: "application/json",
-        headers: ['Auth-Token': apiKey]
-    ]
-
-    def latest = null
-    try {
-        httpGet(latestParams) { resp ->
-            if (resp.status == 200) latest = resp.data
-        }
-    } catch (Exception e) {
-        log.error "Error calling latestdata: ${e.message}"
-    }
-
-    // -----------------------------
-    // 2. GET /status (no API key)
-    // -----------------------------
-    def statusParams = [
+    asynchttpGet("handleStatus", [
         uri: "http://${battery_ip_address}/api/v2/status",
-        contentType: "application/json"
-    ]
+        contentType: "application/json",
+        timeout: 10
+    ])
 
-    def status = null
-    try {
-        httpGet(statusParams) { resp ->
-            if (resp.status == 200) status = resp.data
-        }
-    } catch (Exception e) {
-        log.error "Error calling status: ${e.message}"
+    // Rated capacity rarely changes: refresh it at most once a day
+    def dayMs = 24 * 60 * 60 * 1000
+    if (state.FullChargeCapacity == null || now() - (state.lastCapacityCheck ?: 0) > dayMs) {
+        refreshCapacity()
+    }
+}
+
+def handleStatus(resp, data) {
+    if (resp.hasError()) {
+        log.error "Error calling status: ${resp.getErrorMessage()}"
+        return
+    }
+    if (resp.status != 200) {
+        log.error "Error calling status: HTTP ${resp.status}"
+        return
     }
 
-    // -----------------------------
-    // 3. Process data
-    // -----------------------------
-    if (latest) processLatest(latest)
-    if (status) processStatus(status)
+    def status = resp.json
+    processStatus(status)
 
-    if (flowTiles) updateTiles()
-    if (enableChildDevices) updateChildDevices()
-    if (state.FullChargeCapacity && state.USOC != null) estimateCharge()
+    if (flowTiles) updateTiles(status)
+    if (enableChildDevices) updateChildDevices(status)
+    if (state.FullChargeCapacity) estimateCharge(status)
 }
 
 /* ---------------------------------------------------------
-   PROCESS LATESTDATA — FAST VALUES
+   CAPACITY — /latestdata ONCE A DAY (async, requires API key)
 --------------------------------------------------------- */
-def processLatest(data) {
+def refreshCapacity() {
+    if (!battery_ip_address || !apiKey) return
+    state.lastCapacityCheck = now()
+
+    asynchttpGet("handleLatest", [
+        uri: "http://${battery_ip_address}/api/v2/latestdata",
+        contentType: "application/json",
+        headers: ['Auth-Token': apiKey],
+        timeout: 10
+    ])
+}
+
+def handleLatest(resp, data) {
+    if (resp.hasError()) {
+        log.error "Error calling latestdata: ${resp.getErrorMessage()}"
+        return
+    }
+    if (resp.status != 200) {
+        log.error "Error calling latestdata: HTTP ${resp.status}"
+        return
+    }
+
+    def latest = resp.json
+    if (latest?.FullChargeCapacity != null) {
+        state.FullChargeCapacity = latest.FullChargeCapacity
+        sendEvent(name: "FullChargeCapacity", value: state.FullChargeCapacity)
+        if (logEnable) log.info "FullChargeCapacity updated: ${state.FullChargeCapacity} Wh"
+    }
+}
+
+/* ---------------------------------------------------------
+   PROCESS STATUS
+--------------------------------------------------------- */
+def processStatus(data) {
 
     sendEvent(name: "Production_W", value: data.Production_W)
     sendEvent(name: "Consumption_W", value: data.Consumption_W)
     sendEvent(name: "GridFeedIn_W", value: data.GridFeedIn_W)
     sendEvent(name: "Pac_total_W", value: data.Pac_total_W)
 
-    state.USOC = data.USOC
-    sendEvent(name: "battery", value: state.USOC)
-
-    if (data.FullChargeCapacity != null) {
-        state.FullChargeCapacity = data.FullChargeCapacity
-        sendEvent(name: "FullChargeCapacity", value: state.FullChargeCapacity)
-    }
+    if (data.USOC != null)
+        sendEvent(name: "battery", value: data.USOC)
 
     def power = (data.Production_W ?: 0) - (data.Consumption_W ?: 0)
     sendEvent(name: "power", value: power)
     sendEvent(name: "energy", value: (power / 1000))
 
-    def pac = data.Pac_total_W ?: 0
-    state.BatteryCharging = (pac < 0)
-    state.BatteryDischarging = (pac > 0)
-
-    inferFlows(data)
-}
-
-/* ---------------------------------------------------------
-   PROCESS STATUS — SLOW VALUES ONLY
---------------------------------------------------------- */
-def processStatus(data) {
+    sendEvent(name: "powerSource", value: data.BatteryDischarging ? "battery" : "mains")
 
     if (data.BackupBuffer != null)
         sendEvent(name: "BackupBuffer", value: data.BackupBuffer)
@@ -201,23 +207,7 @@ def processStatus(data) {
 }
 
 /* ---------------------------------------------------------
-   FLOW INFERENCE (ALWAYS CALCULATED)
---------------------------------------------------------- */
-def inferFlows(data) {
-    def prod = data.Production_W ?: 0
-    def cons = data.Consumption_W ?: 0
-    def grid = data.GridFeedIn_W ?: 0
-    def pac  = data.Pac_total_W ?: 0
-
-    // Only this one needs to persist
-    state.FlowGridBattery = (pac < 0 && prod == 0 && grid < 0)
-
-    def flowFromBattery = (pac > 0)
-    sendEvent(name: "powerSource", value: flowFromBattery ? "battery" : "mains")
-}
-
-/* ---------------------------------------------------------
-   TILES — USE ATTRIBUTES
+   TILES — USE STATUS DATA
 --------------------------------------------------------- */
 //icon helpers
 def iconSun()  { "<img src='https://img.icons8.com/material-outlined/48/4a90e2/sun--v1.png'/>" }
@@ -247,19 +237,19 @@ def arrowUpRightReds() { arrowUpRightRed().replace("48","24") }
 def arrowDLs() { arrowDL().replace("48","24") }
 
 
-def updateTiles() {
-    def prod = device.currentValue("Production_W") ?: 0
-    def cons = device.currentValue("Consumption_W") ?: 0
-    def grid = device.currentValue("GridFeedIn_W") ?: 0
-    def pac  = device.currentValue("Pac_total_W") ?: 0
+def updateTiles(data) {
+    def prod = data.Production_W ?: 0
+    def cons = data.Consumption_W ?: 0
+    def grid = data.GridFeedIn_W ?: 0
+    def pac  = data.Pac_total_W ?: 0
 
-    // Recalculate flow booleans (no state needed)
-    def fCP = (prod > 0 && cons > 0)
-    def fPB = (prod > cons && pac < 0)
-    def fPG = (prod > 0 && grid > 0)
-    def fCB = (pac > 0 && cons > 0)
-    def fCG = (grid < 0 && cons > 0)
-    def fGB = state.FlowGridBattery   // this one stays in state
+    // Flow directions reported by the battery
+    def fCP = data.FlowConsumptionProduction
+    def fPB = data.FlowProductionBattery
+    def fPG = data.FlowProductionGrid
+    def fCB = data.FlowConsumptionBattery
+    def fCG = data.FlowConsumptionGrid
+    def fGB = data.FlowGridBattery
 
     def large = "<div><table style='margin:auto'>"
     large += "<tr><td></td><td></td><td>${formatEnergy(prod)}</td><td></td><td></td></tr>"
@@ -282,20 +272,20 @@ def updateTiles() {
 
 
 /* ---------------------------------------------------------
-   CHILD DEVICES — USE ATTRIBUTES
+   CHILD DEVICES — USE STATUS DATA
 --------------------------------------------------------- */
-def updateChildDevices() {
-    def prod = device.currentValue("Production_W") ?: 0
-    def cons = device.currentValue("Consumption_W") ?: 0
-    def grid = device.currentValue("GridFeedIn_W") ?: 0
-    def pac  = device.currentValue("Pac_total_W") ?: 0
+def updateChildDevices(data) {
+    def prod = data.Production_W ?: 0
+    def cons = data.Consumption_W ?: 0
+    def grid = data.GridFeedIn_W ?: 0
+    def pac  = data.Pac_total_W ?: 0
 
     child("Sonnen Total Production").parse([[name: "energy", value: prod / 1000]])
     child("Sonnen Total Consumption").parse([[name: "energy", value: cons / 1000]])
-    child("Sonnen Energy to Grid").parse([[name: "energy", value: Math.max(grid / 1000, 0)]])
-    child("Sonnen Energy from Grid").parse([[name: "energy", value: Math.max(-grid / 1000, 0)]])
-    child("Sonnen Energy from Battery").parse([[name: "energy", value: Math.max(pac / 1000, 0)]])
-    child("Sonnen Energy to Battery").parse([[name: "energy", value: Math.max(-pac / 1000, 0)]])
+    child("Sonnen Energy to Grid").parse([[name: "energy", value: [grid / 1000, 0].max()]])
+    child("Sonnen Energy from Grid").parse([[name: "energy", value: [-grid / 1000, 0].max()]])
+    child("Sonnen Energy from Battery").parse([[name: "energy", value: [pac / 1000, 0].max()]])
+    child("Sonnen Energy to Battery").parse([[name: "energy", value: [-pac / 1000, 0].max()]])
 }
 
 def child(name) {
@@ -307,10 +297,10 @@ def child(name) {
 /* ---------------------------------------------------------
    CHARGE ESTIMATION
 --------------------------------------------------------- */
-def estimateCharge() {
+def estimateCharge(data) {
     def cap = state.FullChargeCapacity ?: 0        // Wh
-    def usoc = state.USOC ?: 0                     // %
-    def pac = device.currentValue("Pac_total_W") ?: 0  // W (+ discharge, - charge)
+    def usoc = data.USOC ?: 0                      // %
+    def pac = data.Pac_total_W ?: 0                // W (+ discharge, - charge)
 
     // Wh currently stored
     def remainingWh = Math.round(cap * (usoc / 100))
@@ -322,14 +312,14 @@ def estimateCharge() {
 
     // Time to full (minutes)
     def tCharge = 0
-    if (state.BatteryCharging && pac < 0) {
+    if (data.BatteryCharging && pac < 0) {
         def chargePower = Math.abs(pac)   // convert negative to positive
         tCharge = Math.round((neededWh / chargePower) * 60)
     }
 
     // Time to empty (minutes)
     def tDischarge = 0
-    if (state.BatteryDischarging && pac > 0) {
+    if (data.BatteryDischarging && pac > 0) {
         def dischargePower = pac
         tDischarge = Math.round((remainingWh / dischargePower) * 60)
     }
