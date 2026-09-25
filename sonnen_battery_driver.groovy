@@ -1,5 +1,3 @@
-import groovy.json.JsonSlurper
-
 metadata {
     definition(
         name: "Sonnen Battery (Optimized Polling)",
@@ -25,12 +23,15 @@ metadata {
         attribute "MinutesToDischarge", "number"
         attribute "FullChargeCapacity", "number"
         attribute "RemainingCapacity_Wh", "number"
+        attribute "healthStatus", "enum", ["unknown", "offline", "online"]
+        attribute "StateOfHealth", "number"
+        attribute "CycleCount", "number"
+        attribute "MaxCellTemperature", "number"
+        attribute "MinCellTemperature", "number"
 
 
-        if (flowTiles) {
-            attribute "flow_tile_large", "string"
-            attribute "flow_tile_small", "string"
-        }
+        attribute "flow_tile_large", "string"
+        attribute "flow_tile_small", "string"
 
         command "setBackupBuffer", [[name: "Backup Buffer*", type: "NUMBER"]]
     }
@@ -62,12 +63,12 @@ metadata {
 
 def installed() {
     if (logEnable) log.info "Driver installed"
-    state.version = "1.5.0"
+    state.version = "1.6.0"
 }
 
 def updated() {
     if (logEnable) log.info "Settings updated"
-    unschedule(refresh)
+    unschedule()
 
     if (settings.refresh_interval != "0") {
         scheduleRefreshJob()
@@ -75,7 +76,15 @@ def updated() {
         if (logEnable) log.info "Polling disabled"
     }
 
-    state.version = "1.5.0"
+    refreshDaily()
+
+    if (!enableChildDevices) removeChildDevices()
+
+    state.remove("USOC")
+    state.remove("BatteryCharging")
+    state.remove("BatteryDischarging")
+    state.remove("FlowGridBattery")
+    state.version = "1.6.0"
 }
 
 def scheduleRefreshJob() {
@@ -106,92 +115,150 @@ def scheduleRefreshJob() {
 }
 
 /* ---------------------------------------------------------
-   MAIN REFRESH — ALWAYS CALL BOTH ENDPOINTS
+   MAIN REFRESH — /status ONLY (async, no API key needed)
 --------------------------------------------------------- */
 def refresh() {
+    asynchttpGet("handleStatus", [
+        uri: "http://${battery_ip_address}/api/v2/status",
+        contentType: "application/json",
+        timeout: 10
+    ])
 
-    // -----------------------------
-    // 1. GET /latestdata (requires API key)
-    // -----------------------------
-    def latestParams = [
+    // Capacity and battery health change slowly: refresh at most once a day
+    def dayMs = 24 * 60 * 60 * 1000
+    if (state.FullChargeCapacity == null || now() - (state.lastDailyCheck ?: 0) > dayMs) {
+        refreshDaily()
+    }
+}
+
+def handleStatus(resp, data) {
+    if (resp.hasError()) {
+        log.error "Error calling status: ${resp.getErrorMessage()}"
+        markFailure()
+        return
+    }
+    if (resp.status != 200) {
+        log.error "Error calling status: HTTP ${resp.status}"
+        markFailure()
+        return
+    }
+
+    markOnline()
+    def status = resp.json
+    processStatus(status)
+
+    if (flowTiles) updateTiles(status)
+    if (enableChildDevices) updateChildDevices(status)
+    if (state.FullChargeCapacity) estimateCharge(status)
+}
+
+/* ---------------------------------------------------------
+   HEALTH — OFFLINE AFTER CONSECUTIVE FAILED POLLS
+--------------------------------------------------------- */
+def markOnline() {
+    if (state.failCount) state.failCount = 0
+    sendEvent(name: "healthStatus", value: "online")
+}
+
+def markFailure() {
+    state.failCount = (state.failCount ?: 0) + 1
+    if (state.failCount >= 3) sendEvent(name: "healthStatus", value: "offline")
+}
+
+/* ---------------------------------------------------------
+   DAILY — CAPACITY (/latestdata) AND BATTERY HEALTH (/battery)
+   (async, requires API key)
+--------------------------------------------------------- */
+def refreshDaily() {
+    if (!battery_ip_address || !apiKey) return
+    state.lastDailyCheck = now()
+
+    asynchttpGet("handleLatest", [
         uri: "http://${battery_ip_address}/api/v2/latestdata",
         contentType: "application/json",
-        headers: ['Auth-Token': apiKey]
-    ]
+        headers: ['Auth-Token': apiKey],
+        timeout: 10
+    ])
 
-    def latest = null
-    try {
-        httpGet(latestParams) { resp ->
-            if (resp.status == 200) latest = resp.data
-        }
-    } catch (Exception e) {
-        log.error "Error calling latestdata: ${e.message}"
+    asynchttpGet("handleBattery", [
+        uri: "http://${battery_ip_address}/api/v2/battery",
+        contentType: "application/json",
+        headers: ['Auth-Token': apiKey],
+        timeout: 10
+    ])
+}
+
+def handleLatest(resp, data) {
+    if (resp.hasError()) {
+        log.error "Error calling latestdata: ${resp.getErrorMessage()}"
+        return
+    }
+    if (resp.status != 200) {
+        log.error "Error calling latestdata: HTTP ${resp.status}"
+        return
     }
 
-    // -----------------------------
-    // 2. GET /status (no API key)
-    // -----------------------------
-    def statusParams = [
-        uri: "http://${battery_ip_address}/api/v2/status",
-        contentType: "application/json"
-    ]
+    def latest = resp.json
+    if (latest?.FullChargeCapacity != null) {
+        state.FullChargeCapacity = latest.FullChargeCapacity
+        sendEvent(name: "FullChargeCapacity", value: state.FullChargeCapacity, unit: "Wh")
+        if (logEnable) log.info "FullChargeCapacity updated: ${state.FullChargeCapacity} Wh"
+    }
+}
 
-    def status = null
-    try {
-        httpGet(statusParams) { resp ->
-            if (resp.status == 200) status = resp.data
-        }
-    } catch (Exception e) {
-        log.error "Error calling status: ${e.message}"
+def handleBattery(resp, data) {
+    if (resp.hasError()) {
+        log.error "Error calling battery: ${resp.getErrorMessage()}"
+        return
+    }
+    if (resp.status != 200) {
+        log.error "Error calling battery: HTTP ${resp.status}"
+        return
     }
 
-    // -----------------------------
-    // 3. Process data
-    // -----------------------------
-    if (latest) processLatest(latest)
-    if (status) processStatus(status)
+    def batt = resp.json
+    if (logEnable) log.info "Battery response: ${batt}"
+    if (!["stateofhealth", "cyclecount", "maximumcelltemperature", "minimumcelltemperature"].any { batt?.get(it) != null })
+        log.warn "Battery endpoint returned none of the health fields"
 
-    if (flowTiles) updateTiles()
-    if (enableChildDevices) updateChildDevices()
-    if (state.FullChargeCapacity && state.USOC != null) estimateCharge()
+    if (batt?.stateofhealth != null)
+        sendEvent(name: "StateOfHealth", value: roundTo(batt.stateofhealth, 1), unit: "%")
+    if (batt?.cyclecount != null)
+        sendEvent(name: "CycleCount", value: Math.round(batt.cyclecount))
+    if (batt?.maximumcelltemperature != null)
+        sendTemperature("MaxCellTemperature", batt.maximumcelltemperature)
+    if (batt?.minimumcelltemperature != null)
+        sendTemperature("MinCellTemperature", batt.minimumcelltemperature)
+}
+
+// The API reports Celsius; convert to the hub's temperature scale
+def sendTemperature(name, celsius) {
+    def scale = location?.temperatureScale ?: "F"
+    def value = (scale == "C") ? celsius : celsius * 9 / 5 + 32
+    sendEvent(name: name, value: roundTo(value, 1), unit: "\u00B0${scale}")
 }
 
 /* ---------------------------------------------------------
-   PROCESS LATESTDATA — FAST VALUES
---------------------------------------------------------- */
-def processLatest(data) {
-
-    sendEvent(name: "Production_W", value: data.Production_W)
-    sendEvent(name: "Consumption_W", value: data.Consumption_W)
-    sendEvent(name: "GridFeedIn_W", value: data.GridFeedIn_W)
-    sendEvent(name: "Pac_total_W", value: data.Pac_total_W)
-
-    state.USOC = data.USOC
-    sendEvent(name: "battery", value: state.USOC)
-
-    if (data.FullChargeCapacity != null) {
-        state.FullChargeCapacity = data.FullChargeCapacity
-        sendEvent(name: "FullChargeCapacity", value: state.FullChargeCapacity)
-    }
-
-    def power = (data.Production_W ?: 0) - (data.Consumption_W ?: 0)
-    sendEvent(name: "power", value: power)
-    sendEvent(name: "energy", value: (power / 1000))
-
-    def pac = data.Pac_total_W ?: 0
-    state.BatteryCharging = (pac < 0)
-    state.BatteryDischarging = (pac > 0)
-
-    inferFlows(data)
-}
-
-/* ---------------------------------------------------------
-   PROCESS STATUS — SLOW VALUES ONLY
+   PROCESS STATUS
 --------------------------------------------------------- */
 def processStatus(data) {
 
+    sendEvent(name: "Production_W", value: data.Production_W, unit: "W")
+    sendEvent(name: "Consumption_W", value: data.Consumption_W, unit: "W")
+    sendEvent(name: "GridFeedIn_W", value: data.GridFeedIn_W, unit: "W")
+    sendEvent(name: "Pac_total_W", value: data.Pac_total_W, unit: "W")
+
+    if (data.USOC != null)
+        sendEvent(name: "battery", value: data.USOC, unit: "%")
+
+    def power = (data.Production_W ?: 0) - (data.Consumption_W ?: 0)
+    sendEvent(name: "power", value: power, unit: "W")
+    sendEvent(name: "energy", value: (power / 1000), unit: "kW")
+
+    sendEvent(name: "powerSource", value: (batteryFlow(data) > 0) ? "battery" : "mains")
+
     if (data.BackupBuffer != null)
-        sendEvent(name: "BackupBuffer", value: data.BackupBuffer)
+        sendEvent(name: "BackupBuffer", value: data.BackupBuffer, unit: "%")
 
     if (data.OperatingMode != null)
         sendEvent(name: "OperatingMode", value: data.OperatingMode)
@@ -201,101 +268,85 @@ def processStatus(data) {
 }
 
 /* ---------------------------------------------------------
-   FLOW INFERENCE (ALWAYS CALCULATED)
+   TILES — USE STATUS DATA
 --------------------------------------------------------- */
-def inferFlows(data) {
+// Tiles use emoji and Unicode arrows: no external images, and short enough
+// to stay well under the 1024-character dashboard attribute limit
+def icon(ch, size)  { "<span style='font-size:${size}'>${ch}</span>" }
+def arrow(ch, color, size) { "<span style='font-size:${size};color:${color}'>${ch}</span>" }
+
+def tileIcons(size) {
+    [sun: icon("\u2600\uFE0F", size), home: icon("\uD83C\uDFE0", size),
+     batt: icon("\uD83D\uDD0B", size), grid: icon("\u26A1", size)]
+}
+
+def tileArrows(on, size) {
+    def green = "#26e07f"
+    def red = "#fa314a"
+    [CP: on.CP ? arrow("\u2199", green, size) : "",   // sun -> home
+     PB: on.PB ? arrow("\u2198", green, size) : "",   // sun -> battery
+     PG: on.PG ? arrow("\u2193", green, size) : "",   // sun -> grid
+     CB: on.CB ? arrow("\u2190", green, size) : "",   // battery -> home
+     CG: on.CG ? arrow("\u2196", red, size) : "",     // grid -> home
+     GB: on.GB ? arrow("\u2197", red, size) : ""]     // grid -> battery
+}
+
+def updateTiles(data) {
     def prod = data.Production_W ?: 0
     def cons = data.Consumption_W ?: 0
     def grid = data.GridFeedIn_W ?: 0
     def pac  = data.Pac_total_W ?: 0
+    def bat  = batteryFlow(data)
 
-    // Only this one needs to persist
-    state.FlowGridBattery = (pac < 0 && prod == 0 && grid < 0)
-
-    def flowFromBattery = (pac > 0)
-    sendEvent(name: "powerSource", value: flowFromBattery ? "battery" : "mains")
-}
-
-/* ---------------------------------------------------------
-   TILES — USE ATTRIBUTES
---------------------------------------------------------- */
-//icon helpers
-def iconSun()  { "<img src='https://img.icons8.com/material-outlined/48/4a90e2/sun--v1.png'/>" }
-def iconHome() { "<img src='https://img.icons8.com/material-outlined/48/4a90e2/cottage.png'/>" }
-def iconBatt() { "<img src='https://img.icons8.com/ios-glyphs/48/4a90e2/battery--v1.png'/>" }
-def iconGrid() { "<img src='https://img.icons8.com/ios/48/4a90e2/transmission-tower.png'/>" }
-
-def iconSuns()  { iconSun().replace("48","24") }
-def iconHomes() { iconHome().replace("48","24") }
-def iconBatts() { iconBatt().replace("48","24") }
-def iconGrids() { iconGrid().replace("48","30") }
-
-def arrowLD() { "<img src='https://img.icons8.com/material-sharp/48/26e07f/left-down2.png'/>" }
-def arrowRD() { "<img src='https://img.icons8.com/material-outlined/48/26e07f/right-down2.png'/>" }
-def arrowDown() { "<img src='https://img.icons8.com/material-rounded/48/26e07f/long-arrow-down.png'/>" }
-def arrowLeft() { "<img src='https://img.icons8.com/material-rounded/48/26e07f/long-arrow-left.png'/>" }
-def arrowUpRed() { "<img src='https://img.icons8.com/material-outlined/48/fa314a/left-up2.png'/>" }
-def arrowUpRightRed() { "<img src='https://img.icons8.com/material-outlined/48/fa314a/right-up2.png'/>" }
-def arrowDL() { "<img src='https://img.icons8.com/material-outlined/48/26e07f/down-left.png'/>" }
-
-def arrowLDs() { arrowLD().replace("48","24") }
-def arrowRDs() { arrowRD().replace("48","24") }
-def arrowDowns() { arrowDown().replace("48","24") }
-def arrowLefts() { arrowLeft().replace("48","24") }
-def arrowUpReds() { arrowUpRed().replace("48","24") }
-def arrowUpRightReds() { arrowUpRightRed().replace("48","24") }
-def arrowDLs() { arrowDL().replace("48","24") }
-
-
-def updateTiles() {
-    def prod = device.currentValue("Production_W") ?: 0
-    def cons = device.currentValue("Consumption_W") ?: 0
-    def grid = device.currentValue("GridFeedIn_W") ?: 0
-    def pac  = device.currentValue("Pac_total_W") ?: 0
-
-    // Recalculate flow booleans (no state needed)
+    // Calculate flow booleans from power values
     def fCP = (prod > 0 && cons > 0)
-    def fPB = (prod > cons && pac < 0)
+    def fPB = (prod > cons && bat < 0)
     def fPG = (prod > 0 && grid > 0)
-    def fCB = (pac > 0 && cons > 0)
+    def fCB = (bat > 0 && cons > 0)
     def fCG = (grid < 0 && cons > 0)
-    def fGB = state.FlowGridBattery   // this one stays in state
+    def fGB = (bat < 0 && prod == 0 && grid < 0)
 
-    def large = "<div><table style='margin:auto'>"
+    def on = [CP: fCP, PB: fPB, PG: fPG, CB: fCB, CG: fCG, GB: fGB]
+
+    def i = tileIcons("2em")
+    def f = tileArrows(on, "2em")
+    def large = "<table style='margin:auto;text-align:center'>"
     large += "<tr><td></td><td></td><td>${formatEnergy(prod)}</td><td></td><td></td></tr>"
-    large += "<tr><td></td><td>${fCP ? arrowLD() : ''}</td><td>${iconSun()}</td><td>${fPB ? arrowRD() : ''}</td><td></td></tr>"
-    large += "<tr><td>${formatEnergy(cons)}</td><td>${iconHome()}</td><td>${fPG ? arrowDown() : ''}${fCB ? arrowLeft() : ''}</td><td>${iconBatt()}</td><td>${formatEnergy(pac)}</td></tr>"
-    large += "<tr><td></td><td>${fCG ? arrowUpRed() : ''}</td><td>${iconGrid()}</td><td>${fGB ? arrowUpRightRed() : ''}</td><td></td></tr>"
+    large += "<tr><td></td><td>${f.CP}</td><td>${i.sun}</td><td>${f.PB}</td><td></td></tr>"
+    large += "<tr><td>${formatEnergy(cons)}</td><td>${i.home}</td><td>${f.PG}${f.CB}</td><td>${i.batt}</td><td>${formatEnergy(pac)}</td></tr>"
+    large += "<tr><td></td><td>${f.CG}</td><td>${i.grid}</td><td>${f.GB}</td><td></td></tr>"
     large += "<tr><td></td><td></td><td>${formatEnergy(grid)}</td><td></td><td></td></tr>"
-    large += "</table></div>"
+    large += "</table>"
 
     sendEvent(name: "flow_tile_large", value: large)
 
-    def small = "<div><table style='margin:auto'>"
-    small += "<tr><td>${fCP ? arrowLDs() : ''}</td><td>${iconSuns()}</td><td>${fPB ? arrowRDs() : ''}</td></tr>"
-    small += "<tr><td>${iconHomes()}</td><td>${fPG ? arrowDowns() : ''}${fCB ? arrowLefts() : ''}</td><td>${iconBatts()}</td></tr>"
-    small += "<tr><td>${fCG ? arrowUpReds() : ''}</td><td>${iconGrids()}</td><td>${fGB ? arrowUpRightReds() : ''}</td></tr>"
-    small += "</table></div>"
+    i = tileIcons("1.3em")
+    f = tileArrows(on, "1.3em")
+    def small = "<table style='margin:auto;text-align:center'>"
+    small += "<tr><td>${f.CP}</td><td>${i.sun}</td><td>${f.PB}</td></tr>"
+    small += "<tr><td>${i.home}</td><td>${f.PG}${f.CB}</td><td>${i.batt}</td></tr>"
+    small += "<tr><td>${f.CG}</td><td>${i.grid}</td><td>${f.GB}</td></tr>"
+    small += "</table>"
 
     sendEvent(name: "flow_tile_small", value: small)
 }
 
 
 /* ---------------------------------------------------------
-   CHILD DEVICES — USE ATTRIBUTES
+   CHILD DEVICES — USE STATUS DATA
 --------------------------------------------------------- */
-def updateChildDevices() {
-    def prod = device.currentValue("Production_W") ?: 0
-    def cons = device.currentValue("Consumption_W") ?: 0
-    def grid = device.currentValue("GridFeedIn_W") ?: 0
-    def pac  = device.currentValue("Pac_total_W") ?: 0
+def updateChildDevices(data) {
+    def prod = data.Production_W ?: 0
+    def cons = data.Consumption_W ?: 0
+    def grid = data.GridFeedIn_W ?: 0
+    def pac  = batteryFlow(data)
 
-    child("Sonnen Total Production").parse([[name: "energy", value: prod / 1000]])
-    child("Sonnen Total Consumption").parse([[name: "energy", value: cons / 1000]])
-    child("Sonnen Energy to Grid").parse([[name: "energy", value: Math.max(grid / 1000, 0)]])
-    child("Sonnen Energy from Grid").parse([[name: "energy", value: Math.max(-grid / 1000, 0)]])
-    child("Sonnen Energy from Battery").parse([[name: "energy", value: Math.max(pac / 1000, 0)]])
-    child("Sonnen Energy to Battery").parse([[name: "energy", value: Math.max(-pac / 1000, 0)]])
+    child("Sonnen Total Production").parse([[name: "energy", value: prod / 1000, unit: "kW"]])
+    child("Sonnen Total Consumption").parse([[name: "energy", value: cons / 1000, unit: "kW"]])
+    child("Sonnen Energy to Grid").parse([[name: "energy", value: [grid / 1000, 0].max(), unit: "kW"]])
+    child("Sonnen Energy from Grid").parse([[name: "energy", value: [-grid / 1000, 0].max(), unit: "kW"]])
+    child("Sonnen Energy from Battery").parse([[name: "energy", value: [pac / 1000, 0].max(), unit: "kW"]])
+    child("Sonnen Energy to Battery").parse([[name: "energy", value: [-pac / 1000, 0].max(), unit: "kW"]])
 }
 
 def child(name) {
@@ -304,17 +355,33 @@ def child(name) {
     return d
 }
 
+def removeChildDevices() {
+    getChildDevices().each { d ->
+        try {
+            deleteChildDevice(d.deviceNetworkId)
+            if (logEnable) log.info "Removed child device ${d.displayName}"
+        } catch (e) {
+            log.warn "Could not remove child device ${d.displayName}: ${e.message}"
+        }
+    }
+}
+
+// Called by the Generic Component driver when Refresh is pressed on a child
+def componentRefresh(cd) {
+    refresh()
+}
+
 /* ---------------------------------------------------------
    CHARGE ESTIMATION
 --------------------------------------------------------- */
-def estimateCharge() {
+def estimateCharge(data) {
     def cap = state.FullChargeCapacity ?: 0        // Wh
-    def usoc = state.USOC ?: 0                     // %
-    def pac = device.currentValue("Pac_total_W") ?: 0  // W (+ discharge, - charge)
+    def usoc = data.USOC ?: 0                      // %
+    def pac = batteryFlow(data)                    // W (+ discharge, - charge)
 
     // Wh currently stored
     def remainingWh = Math.round(cap * (usoc / 100))
-    sendEvent(name: "RemainingCapacity_Wh", value: remainingWh)
+    sendEvent(name: "RemainingCapacity_Wh", value: remainingWh, unit: "Wh")
 
 
     // Wh needed to reach 100%
@@ -322,20 +389,20 @@ def estimateCharge() {
 
     // Time to full (minutes)
     def tCharge = 0
-    if (state.BatteryCharging && pac < 0) {
+    if (pac < 0) {
         def chargePower = Math.abs(pac)   // convert negative to positive
         tCharge = Math.round((neededWh / chargePower) * 60)
     }
 
     // Time to empty (minutes)
     def tDischarge = 0
-    if (state.BatteryDischarging && pac > 0) {
+    if (pac > 0) {
         def dischargePower = pac
         tDischarge = Math.round((remainingWh / dischargePower) * 60)
     }
 
-    sendEvent(name: "MinutesToCharge", value: tCharge)
-    sendEvent(name: "MinutesToDischarge", value: tDischarge)
+    sendEvent(name: "MinutesToCharge", value: tCharge, unit: "min")
+    sendEvent(name: "MinutesToDischarge", value: tDischarge, unit: "min")
 }
 
 
@@ -343,23 +410,56 @@ def estimateCharge() {
    BACKUP BUFFER COMMAND
 --------------------------------------------------------- */
 def setBackupBuffer(buffer) {
+    // Valid values: 0 (disabled) or a whole number from 5 to 100
+    def value = null
     try {
-        httpPut([
-            uri: "http://${battery_ip_address}/api/v2/configurations",
-            body: [EM_USOC: buffer],
-            contentType: "application/json",
-            headers: ['Auth-Token': apiKey]
-        ]) { resp ->
-            if (resp.status == 200) log.info "BackupBuffer updated"
-        }
-    } catch (e) {
-        log.error "BackupBuffer error: ${e.message}"
+        def bd = new BigDecimal(buffer.toString())
+        if (bd.stripTrailingZeros().scale() <= 0) value = bd.intValue()
+    } catch (e) { }
+
+    if (value == null || !(value == 0 || (value >= 5 && value <= 100))) {
+        log.error "Invalid Backup Buffer ${buffer}: use 0 (disabled) or a whole number from 5 to 100"
+        return
     }
+
+    asynchttpPut("handleBackupBuffer", [
+        uri: "http://${battery_ip_address}/api/v2/site/configurations",
+        requestContentType: "application/json",
+        contentType: "application/json",
+        headers: ['Auth-Token': apiKey],
+        body: [EM_USOC: value.toString()],
+        timeout: 10
+    ], [value: value])
+}
+
+def handleBackupBuffer(resp, data) {
+    if (resp.hasError()) {
+        log.error "BackupBuffer error: ${resp.getErrorMessage()}"
+        return
+    }
+    if (resp.status != 200) {
+        log.error "BackupBuffer error: HTTP ${resp.status}"
+        return
+    }
+
+    log.info "BackupBuffer set to ${data.value}%"
+    refresh()
 }
 
 /* ---------------------------------------------------------
    HELPERS
 --------------------------------------------------------- */
+// Battery power with standby draw filtered out (about -25 W when idle):
+// anything within 50 W of zero counts as not charging or discharging
+def batteryFlow(data) {
+    def pac = data.Pac_total_W ?: 0
+    return (pac.abs() < 50) ? 0 : pac
+}
+
+def roundTo(n, places) {
+    new BigDecimal(n.toString()).setScale(places, BigDecimal.ROUND_HALF_UP)
+}
+
 def formatEnergy(e) {
     if (e == null) return "0 W"
     if (e.abs() < 1000) return "${e} W"
