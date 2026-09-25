@@ -217,6 +217,10 @@ def handleBattery(resp, data) {
     }
 
     def batt = resp.json
+    if (logEnable) log.info "Battery response: ${batt}"
+    if (!["stateofhealth", "cyclecount", "maximumcelltemperature", "minimumcelltemperature"].any { batt?.get(it) != null })
+        log.warn "Battery endpoint returned none of the health fields"
+
     if (batt?.stateofhealth != null)
         sendEvent(name: "StateOfHealth", value: roundTo(batt.stateofhealth, 1), unit: "%")
     if (batt?.cyclecount != null)
