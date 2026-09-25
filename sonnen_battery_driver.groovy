@@ -187,7 +187,7 @@ def handleLatest(resp, data) {
     def latest = resp.json
     if (latest?.FullChargeCapacity != null) {
         state.FullChargeCapacity = latest.FullChargeCapacity
-        sendEvent(name: "FullChargeCapacity", value: state.FullChargeCapacity)
+        sendEvent(name: "FullChargeCapacity", value: state.FullChargeCapacity, unit: "Wh")
         if (logEnable) log.info "FullChargeCapacity updated: ${state.FullChargeCapacity} Wh"
     }
 }
@@ -197,23 +197,23 @@ def handleLatest(resp, data) {
 --------------------------------------------------------- */
 def processStatus(data) {
 
-    sendEvent(name: "Production_W", value: data.Production_W)
-    sendEvent(name: "Consumption_W", value: data.Consumption_W)
-    sendEvent(name: "GridFeedIn_W", value: data.GridFeedIn_W)
-    sendEvent(name: "Pac_total_W", value: data.Pac_total_W)
+    sendEvent(name: "Production_W", value: data.Production_W, unit: "W")
+    sendEvent(name: "Consumption_W", value: data.Consumption_W, unit: "W")
+    sendEvent(name: "GridFeedIn_W", value: data.GridFeedIn_W, unit: "W")
+    sendEvent(name: "Pac_total_W", value: data.Pac_total_W, unit: "W")
 
     if (data.USOC != null)
-        sendEvent(name: "battery", value: data.USOC)
+        sendEvent(name: "battery", value: data.USOC, unit: "%")
 
     def power = (data.Production_W ?: 0) - (data.Consumption_W ?: 0)
-    sendEvent(name: "power", value: power)
-    sendEvent(name: "energy", value: (power / 1000))
+    sendEvent(name: "power", value: power, unit: "W")
+    sendEvent(name: "energy", value: (power / 1000), unit: "kW")
 
     def pac = data.Pac_total_W ?: 0
     sendEvent(name: "powerSource", value: (pac > 0) ? "battery" : "mains")
 
     if (data.BackupBuffer != null)
-        sendEvent(name: "BackupBuffer", value: data.BackupBuffer)
+        sendEvent(name: "BackupBuffer", value: data.BackupBuffer, unit: "%")
 
     if (data.OperatingMode != null)
         sendEvent(name: "OperatingMode", value: data.OperatingMode)
@@ -296,12 +296,12 @@ def updateChildDevices(data) {
     def grid = data.GridFeedIn_W ?: 0
     def pac  = data.Pac_total_W ?: 0
 
-    child("Sonnen Total Production").parse([[name: "energy", value: prod / 1000]])
-    child("Sonnen Total Consumption").parse([[name: "energy", value: cons / 1000]])
-    child("Sonnen Energy to Grid").parse([[name: "energy", value: [grid / 1000, 0].max()]])
-    child("Sonnen Energy from Grid").parse([[name: "energy", value: [-grid / 1000, 0].max()]])
-    child("Sonnen Energy from Battery").parse([[name: "energy", value: [pac / 1000, 0].max()]])
-    child("Sonnen Energy to Battery").parse([[name: "energy", value: [-pac / 1000, 0].max()]])
+    child("Sonnen Total Production").parse([[name: "energy", value: prod / 1000, unit: "kW"]])
+    child("Sonnen Total Consumption").parse([[name: "energy", value: cons / 1000, unit: "kW"]])
+    child("Sonnen Energy to Grid").parse([[name: "energy", value: [grid / 1000, 0].max(), unit: "kW"]])
+    child("Sonnen Energy from Grid").parse([[name: "energy", value: [-grid / 1000, 0].max(), unit: "kW"]])
+    child("Sonnen Energy from Battery").parse([[name: "energy", value: [pac / 1000, 0].max(), unit: "kW"]])
+    child("Sonnen Energy to Battery").parse([[name: "energy", value: [-pac / 1000, 0].max(), unit: "kW"]])
 }
 
 def child(name) {
@@ -320,7 +320,7 @@ def estimateCharge(data) {
 
     // Wh currently stored
     def remainingWh = Math.round(cap * (usoc / 100))
-    sendEvent(name: "RemainingCapacity_Wh", value: remainingWh)
+    sendEvent(name: "RemainingCapacity_Wh", value: remainingWh, unit: "Wh")
 
 
     // Wh needed to reach 100%
@@ -340,8 +340,8 @@ def estimateCharge(data) {
         tDischarge = Math.round((remainingWh / dischargePower) * 60)
     }
 
-    sendEvent(name: "MinutesToCharge", value: tCharge)
-    sendEvent(name: "MinutesToDischarge", value: tDischarge)
+    sendEvent(name: "MinutesToCharge", value: tCharge, unit: "min")
+    sendEvent(name: "MinutesToDischarge", value: tDischarge, unit: "min")
 }
 
 
