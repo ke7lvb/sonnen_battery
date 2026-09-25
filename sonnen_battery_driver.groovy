@@ -23,6 +23,7 @@ metadata {
         attribute "MinutesToDischarge", "number"
         attribute "FullChargeCapacity", "number"
         attribute "RemainingCapacity_Wh", "number"
+        attribute "healthStatus", "enum", ["unknown", "offline", "online"]
 
 
         if (flowTiles) {
@@ -129,19 +130,35 @@ def refresh() {
 def handleStatus(resp, data) {
     if (resp.hasError()) {
         log.error "Error calling status: ${resp.getErrorMessage()}"
+        markFailure()
         return
     }
     if (resp.status != 200) {
         log.error "Error calling status: HTTP ${resp.status}"
+        markFailure()
         return
     }
 
+    markOnline()
     def status = resp.json
     processStatus(status)
 
     if (flowTiles) updateTiles(status)
     if (enableChildDevices) updateChildDevices(status)
     if (state.FullChargeCapacity) estimateCharge(status)
+}
+
+/* ---------------------------------------------------------
+   HEALTH — OFFLINE AFTER CONSECUTIVE FAILED POLLS
+--------------------------------------------------------- */
+def markOnline() {
+    if (state.failCount) state.failCount = 0
+    sendEvent(name: "healthStatus", value: "online")
+}
+
+def markFailure() {
+    state.failCount = (state.failCount ?: 0) + 1
+    if (state.failCount >= 3) sendEvent(name: "healthStatus", value: "offline")
 }
 
 /* ---------------------------------------------------------
