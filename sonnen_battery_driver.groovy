@@ -26,10 +26,8 @@ metadata {
         attribute "healthStatus", "enum", ["unknown", "offline", "online"]
 
 
-        if (flowTiles) {
-            attribute "flow_tile_large", "string"
-            attribute "flow_tile_small", "string"
-        }
+        attribute "flow_tile_large", "string"
+        attribute "flow_tile_small", "string"
 
         command "setBackupBuffer", [[name: "Backup Buffer*", type: "NUMBER"]]
     }
@@ -351,18 +349,40 @@ def estimateCharge(data) {
    BACKUP BUFFER COMMAND
 --------------------------------------------------------- */
 def setBackupBuffer(buffer) {
+    // Valid values: 0 (disabled) or a whole number from 5 to 100
+    def value = null
     try {
-        httpPut([
-            uri: "http://${battery_ip_address}/api/v2/configurations",
-            body: [EM_USOC: buffer],
-            contentType: "application/json",
-            headers: ['Auth-Token': apiKey]
-        ]) { resp ->
-            if (resp.status == 200) log.info "BackupBuffer updated"
-        }
-    } catch (e) {
-        log.error "BackupBuffer error: ${e.message}"
+        def bd = new BigDecimal(buffer.toString())
+        if (bd.stripTrailingZeros().scale() <= 0) value = bd.intValue()
+    } catch (e) { }
+
+    if (value == null || !(value == 0 || (value >= 5 && value <= 100))) {
+        log.error "Invalid Backup Buffer ${buffer}: use 0 (disabled) or a whole number from 5 to 100"
+        return
     }
+
+    asynchttpPut("handleBackupBuffer", [
+        uri: "http://${battery_ip_address}/api/v2/site/configurations",
+        requestContentType: "application/json",
+        contentType: "application/json",
+        headers: ['Auth-Token': apiKey],
+        body: [EM_USOC: value.toString()],
+        timeout: 10
+    ], [value: value])
+}
+
+def handleBackupBuffer(resp, data) {
+    if (resp.hasError()) {
+        log.error "BackupBuffer error: ${resp.getErrorMessage()}"
+        return
+    }
+    if (resp.status != 200) {
+        log.error "BackupBuffer error: HTTP ${resp.status}"
+        return
+    }
+
+    log.info "BackupBuffer set to ${data.value}%"
+    refresh()
 }
 
 /* ---------------------------------------------------------
