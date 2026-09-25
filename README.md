@@ -60,3 +60,4 @@ Green arrows show solar and battery flows; red arrows show power drawn from the 
 # Child Devices
 Enable **Enable Child Devices** to create six component devices (production,
 consumption, to/from grid, to/from battery). Each reports its flow as `energy` in kW.
+Turning the option off and saving preferences removes the child devices.

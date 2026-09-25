@@ -78,6 +78,8 @@ def updated() {
 
     refreshDaily()
 
+    if (!enableChildDevices) removeChildDevices()
+
     state.remove("USOC")
     state.remove("BatteryCharging")
     state.remove("BatteryDischarging")
@@ -340,6 +342,22 @@ def child(name) {
     def d = getChildDevice(name)
     if (!d) d = addChildDevice("hubitat", "Generic Component Energy Meter", name, [name: name, isComponent: false])
     return d
+}
+
+def removeChildDevices() {
+    getChildDevices().each { d ->
+        try {
+            deleteChildDevice(d.deviceNetworkId)
+            if (logEnable) log.info "Removed child device ${d.displayName}"
+        } catch (e) {
+            log.warn "Could not remove child device ${d.displayName}: ${e.message}"
+        }
+    }
+}
+
+// Called by the Generic Component driver when Refresh is pressed on a child
+def componentRefresh(cd) {
+    refresh()
 }
 
 /* ---------------------------------------------------------
