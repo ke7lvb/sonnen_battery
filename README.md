@@ -39,7 +39,7 @@ Written for Sonnen Core. Might work with other models.
 | `MinutesToDischarge` | min | Estimated time to empty at the current discharge rate |
 | `StateOfHealth` | % | Remaining capacity compared with new (daily) |
 | `CycleCount` | | Full charge cycles (daily) |
-| `MaxCellTemperature` / `MinCellTemperature` | °C | Cell temperatures at the time of the daily check |
+| `MaxCellTemperature` / `MinCellTemperature` | °F or °C | Hottest and coldest cell at the time of the daily check, in the hub's temperature scale |
 | `healthStatus` | | `online`, or `offline` after 3 failed polls in a row |
 
 # Commands

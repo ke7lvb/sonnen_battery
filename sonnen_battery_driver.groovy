@@ -226,9 +226,16 @@ def handleBattery(resp, data) {
     if (batt?.cyclecount != null)
         sendEvent(name: "CycleCount", value: Math.round(batt.cyclecount))
     if (batt?.maximumcelltemperature != null)
-        sendEvent(name: "MaxCellTemperature", value: roundTo(batt.maximumcelltemperature, 1), unit: "\u00B0C")
+        sendTemperature("MaxCellTemperature", batt.maximumcelltemperature)
     if (batt?.minimumcelltemperature != null)
-        sendEvent(name: "MinCellTemperature", value: roundTo(batt.minimumcelltemperature, 1), unit: "\u00B0C")
+        sendTemperature("MinCellTemperature", batt.minimumcelltemperature)
+}
+
+// The API reports Celsius; convert to the hub's temperature scale
+def sendTemperature(name, celsius) {
+    def scale = location?.temperatureScale ?: "F"
+    def value = (scale == "C") ? celsius : celsius * 9 / 5 + 32
+    sendEvent(name: name, value: roundTo(value, 1), unit: "\u00B0${scale}")
 }
 
 /* ---------------------------------------------------------
