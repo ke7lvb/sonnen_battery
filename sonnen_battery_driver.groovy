@@ -24,6 +24,10 @@ metadata {
         attribute "FullChargeCapacity", "number"
         attribute "RemainingCapacity_Wh", "number"
         attribute "healthStatus", "enum", ["unknown", "offline", "online"]
+        attribute "StateOfHealth", "number"
+        attribute "CycleCount", "number"
+        attribute "MaxCellTemperature", "number"
+        attribute "MinCellTemperature", "number"
 
 
         attribute "flow_tile_large", "string"
@@ -72,7 +76,7 @@ def updated() {
         if (logEnable) log.info "Polling disabled"
     }
 
-    refreshCapacity()
+    refreshDaily()
 
     state.remove("USOC")
     state.remove("BatteryCharging")
@@ -118,10 +122,10 @@ def refresh() {
         timeout: 10
     ])
 
-    // Rated capacity rarely changes: refresh it at most once a day
+    // Capacity and battery health change slowly: refresh at most once a day
     def dayMs = 24 * 60 * 60 * 1000
-    if (state.FullChargeCapacity == null || now() - (state.lastCapacityCheck ?: 0) > dayMs) {
-        refreshCapacity()
+    if (state.FullChargeCapacity == null || now() - (state.lastDailyCheck ?: 0) > dayMs) {
+        refreshDaily()
     }
 }
 
@@ -160,14 +164,22 @@ def markFailure() {
 }
 
 /* ---------------------------------------------------------
-   CAPACITY — /latestdata ONCE A DAY (async, requires API key)
+   DAILY — CAPACITY (/latestdata) AND BATTERY HEALTH (/battery)
+   (async, requires API key)
 --------------------------------------------------------- */
-def refreshCapacity() {
+def refreshDaily() {
     if (!battery_ip_address || !apiKey) return
-    state.lastCapacityCheck = now()
+    state.lastDailyCheck = now()
 
     asynchttpGet("handleLatest", [
         uri: "http://${battery_ip_address}/api/v2/latestdata",
+        contentType: "application/json",
+        headers: ['Auth-Token': apiKey],
+        timeout: 10
+    ])
+
+    asynchttpGet("handleBattery", [
+        uri: "http://${battery_ip_address}/api/v2/battery",
         contentType: "application/json",
         headers: ['Auth-Token': apiKey],
         timeout: 10
@@ -190,6 +202,27 @@ def handleLatest(resp, data) {
         sendEvent(name: "FullChargeCapacity", value: state.FullChargeCapacity, unit: "Wh")
         if (logEnable) log.info "FullChargeCapacity updated: ${state.FullChargeCapacity} Wh"
     }
+}
+
+def handleBattery(resp, data) {
+    if (resp.hasError()) {
+        log.error "Error calling battery: ${resp.getErrorMessage()}"
+        return
+    }
+    if (resp.status != 200) {
+        log.error "Error calling battery: HTTP ${resp.status}"
+        return
+    }
+
+    def batt = resp.json
+    if (batt?.stateofhealth != null)
+        sendEvent(name: "StateOfHealth", value: roundTo(batt.stateofhealth, 1), unit: "%")
+    if (batt?.cyclecount != null)
+        sendEvent(name: "CycleCount", value: Math.round(batt.cyclecount))
+    if (batt?.maximumcelltemperature != null)
+        sendEvent(name: "MaxCellTemperature", value: roundTo(batt.maximumcelltemperature, 1), unit: "\u00B0C")
+    if (batt?.minimumcelltemperature != null)
+        sendEvent(name: "MinCellTemperature", value: roundTo(batt.minimumcelltemperature, 1), unit: "\u00B0C")
 }
 
 /* ---------------------------------------------------------
@@ -225,33 +258,26 @@ def processStatus(data) {
 /* ---------------------------------------------------------
    TILES — USE STATUS DATA
 --------------------------------------------------------- */
-//icon helpers
-def iconSun()  { "<img src='https://img.icons8.com/material-outlined/48/4a90e2/sun--v1.png'/>" }
-def iconHome() { "<img src='https://img.icons8.com/material-outlined/48/4a90e2/cottage.png'/>" }
-def iconBatt() { "<img src='https://img.icons8.com/ios-glyphs/48/4a90e2/battery--v1.png'/>" }
-def iconGrid() { "<img src='https://img.icons8.com/ios/48/4a90e2/transmission-tower.png'/>" }
+// Tiles use emoji and Unicode arrows: no external images, and short enough
+// to stay well under the 1024-character dashboard attribute limit
+def icon(ch, size)  { "<span style='font-size:${size}'>${ch}</span>" }
+def arrow(ch, color, size) { "<span style='font-size:${size};color:${color}'>${ch}</span>" }
 
-def iconSuns()  { iconSun().replace("48","24") }
-def iconHomes() { iconHome().replace("48","24") }
-def iconBatts() { iconBatt().replace("48","24") }
-def iconGrids() { iconGrid().replace("48","30") }
+def tileIcons(size) {
+    [sun: icon("\u2600\uFE0F", size), home: icon("\uD83C\uDFE0", size),
+     batt: icon("\uD83D\uDD0B", size), grid: icon("\u26A1", size)]
+}
 
-def arrowLD() { "<img src='https://img.icons8.com/material-sharp/48/26e07f/left-down2.png'/>" }
-def arrowRD() { "<img src='https://img.icons8.com/material-outlined/48/26e07f/right-down2.png'/>" }
-def arrowDown() { "<img src='https://img.icons8.com/material-rounded/48/26e07f/long-arrow-down.png'/>" }
-def arrowLeft() { "<img src='https://img.icons8.com/material-rounded/48/26e07f/long-arrow-left.png'/>" }
-def arrowUpRed() { "<img src='https://img.icons8.com/material-outlined/48/fa314a/left-up2.png'/>" }
-def arrowUpRightRed() { "<img src='https://img.icons8.com/material-outlined/48/fa314a/right-up2.png'/>" }
-def arrowDL() { "<img src='https://img.icons8.com/material-outlined/48/26e07f/down-left.png'/>" }
-
-def arrowLDs() { arrowLD().replace("48","24") }
-def arrowRDs() { arrowRD().replace("48","24") }
-def arrowDowns() { arrowDown().replace("48","24") }
-def arrowLefts() { arrowLeft().replace("48","24") }
-def arrowUpReds() { arrowUpRed().replace("48","24") }
-def arrowUpRightReds() { arrowUpRightRed().replace("48","24") }
-def arrowDLs() { arrowDL().replace("48","24") }
-
+def tileArrows(on, size) {
+    def green = "#26e07f"
+    def red = "#fa314a"
+    [CP: on.CP ? arrow("\u2199", green, size) : "",   // sun -> home
+     PB: on.PB ? arrow("\u2198", green, size) : "",   // sun -> battery
+     PG: on.PG ? arrow("\u2193", green, size) : "",   // sun -> grid
+     CB: on.CB ? arrow("\u2190", green, size) : "",   // battery -> home
+     CG: on.CG ? arrow("\u2196", red, size) : "",     // grid -> home
+     GB: on.GB ? arrow("\u2197", red, size) : ""]     // grid -> battery
+}
 
 def updateTiles(data) {
     def prod = data.Production_W ?: 0
@@ -267,21 +293,27 @@ def updateTiles(data) {
     def fCG = (grid < 0 && cons > 0)
     def fGB = (pac < 0 && prod == 0 && grid < 0)
 
-    def large = "<div><table style='margin:auto'>"
+    def on = [CP: fCP, PB: fPB, PG: fPG, CB: fCB, CG: fCG, GB: fGB]
+
+    def i = tileIcons("2em")
+    def f = tileArrows(on, "2em")
+    def large = "<table style='margin:auto;text-align:center'>"
     large += "<tr><td></td><td></td><td>${formatEnergy(prod)}</td><td></td><td></td></tr>"
-    large += "<tr><td></td><td>${fCP ? arrowLD() : ''}</td><td>${iconSun()}</td><td>${fPB ? arrowRD() : ''}</td><td></td></tr>"
-    large += "<tr><td>${formatEnergy(cons)}</td><td>${iconHome()}</td><td>${fPG ? arrowDown() : ''}${fCB ? arrowLeft() : ''}</td><td>${iconBatt()}</td><td>${formatEnergy(pac)}</td></tr>"
-    large += "<tr><td></td><td>${fCG ? arrowUpRed() : ''}</td><td>${iconGrid()}</td><td>${fGB ? arrowUpRightRed() : ''}</td><td></td></tr>"
+    large += "<tr><td></td><td>${f.CP}</td><td>${i.sun}</td><td>${f.PB}</td><td></td></tr>"
+    large += "<tr><td>${formatEnergy(cons)}</td><td>${i.home}</td><td>${f.PG}${f.CB}</td><td>${i.batt}</td><td>${formatEnergy(pac)}</td></tr>"
+    large += "<tr><td></td><td>${f.CG}</td><td>${i.grid}</td><td>${f.GB}</td><td></td></tr>"
     large += "<tr><td></td><td></td><td>${formatEnergy(grid)}</td><td></td><td></td></tr>"
-    large += "</table></div>"
+    large += "</table>"
 
     sendEvent(name: "flow_tile_large", value: large)
 
-    def small = "<div><table style='margin:auto'>"
-    small += "<tr><td>${fCP ? arrowLDs() : ''}</td><td>${iconSuns()}</td><td>${fPB ? arrowRDs() : ''}</td></tr>"
-    small += "<tr><td>${iconHomes()}</td><td>${fPG ? arrowDowns() : ''}${fCB ? arrowLefts() : ''}</td><td>${iconBatts()}</td></tr>"
-    small += "<tr><td>${fCG ? arrowUpReds() : ''}</td><td>${iconGrids()}</td><td>${fGB ? arrowUpRightReds() : ''}</td></tr>"
-    small += "</table></div>"
+    i = tileIcons("1.3em")
+    f = tileArrows(on, "1.3em")
+    def small = "<table style='margin:auto;text-align:center'>"
+    small += "<tr><td>${f.CP}</td><td>${i.sun}</td><td>${f.PB}</td></tr>"
+    small += "<tr><td>${i.home}</td><td>${f.PG}${f.CB}</td><td>${i.batt}</td></tr>"
+    small += "<tr><td>${f.CG}</td><td>${i.grid}</td><td>${f.GB}</td></tr>"
+    small += "</table>"
 
     sendEvent(name: "flow_tile_small", value: small)
 }
@@ -388,6 +420,10 @@ def handleBackupBuffer(resp, data) {
 /* ---------------------------------------------------------
    HELPERS
 --------------------------------------------------------- */
+def roundTo(n, places) {
+    new BigDecimal(n.toString()).setScale(places, BigDecimal.ROUND_HALF_UP)
+}
+
 def formatEnergy(e) {
     if (e == null) return "0 W"
     if (e.abs() < 1000) return "${e} W"
