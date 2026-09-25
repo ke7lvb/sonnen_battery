@@ -194,7 +194,8 @@ def processStatus(data) {
     sendEvent(name: "power", value: power)
     sendEvent(name: "energy", value: (power / 1000))
 
-    sendEvent(name: "powerSource", value: data.BatteryDischarging ? "battery" : "mains")
+    def pac = data.Pac_total_W ?: 0
+    sendEvent(name: "powerSource", value: (pac > 0) ? "battery" : "mains")
 
     if (data.BackupBuffer != null)
         sendEvent(name: "BackupBuffer", value: data.BackupBuffer)
@@ -243,13 +244,13 @@ def updateTiles(data) {
     def grid = data.GridFeedIn_W ?: 0
     def pac  = data.Pac_total_W ?: 0
 
-    // Flow directions reported by the battery
-    def fCP = data.FlowConsumptionProduction
-    def fPB = data.FlowProductionBattery
-    def fPG = data.FlowProductionGrid
-    def fCB = data.FlowConsumptionBattery
-    def fCG = data.FlowConsumptionGrid
-    def fGB = data.FlowGridBattery
+    // Calculate flow booleans from power values
+    def fCP = (prod > 0 && cons > 0)
+    def fPB = (prod > cons && pac < 0)
+    def fPG = (prod > 0 && grid > 0)
+    def fCB = (pac > 0 && cons > 0)
+    def fCG = (grid < 0 && cons > 0)
+    def fGB = (pac < 0 && prod == 0 && grid < 0)
 
     def large = "<div><table style='margin:auto'>"
     large += "<tr><td></td><td></td><td>${formatEnergy(prod)}</td><td></td><td></td></tr>"
@@ -312,14 +313,14 @@ def estimateCharge(data) {
 
     // Time to full (minutes)
     def tCharge = 0
-    if (data.BatteryCharging && pac < 0) {
+    if (pac < 0) {
         def chargePower = Math.abs(pac)   // convert negative to positive
         tCharge = Math.round((neededWh / chargePower) * 60)
     }
 
     // Time to empty (minutes)
     def tDischarge = 0
-    if (data.BatteryDischarging && pac > 0) {
+    if (pac > 0) {
         def dischargePower = pac
         tDischarge = Math.round((remainingWh / dischargePower) * 60)
     }
