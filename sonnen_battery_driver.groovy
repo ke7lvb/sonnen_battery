@@ -255,8 +255,7 @@ def processStatus(data) {
     sendEvent(name: "power", value: power, unit: "W")
     sendEvent(name: "energy", value: (power / 1000), unit: "kW")
 
-    def pac = data.Pac_total_W ?: 0
-    sendEvent(name: "powerSource", value: (pac > 0) ? "battery" : "mains")
+    sendEvent(name: "powerSource", value: (batteryFlow(data) > 0) ? "battery" : "mains")
 
     if (data.BackupBuffer != null)
         sendEvent(name: "BackupBuffer", value: data.BackupBuffer, unit: "%")
@@ -297,14 +296,15 @@ def updateTiles(data) {
     def cons = data.Consumption_W ?: 0
     def grid = data.GridFeedIn_W ?: 0
     def pac  = data.Pac_total_W ?: 0
+    def bat  = batteryFlow(data)
 
     // Calculate flow booleans from power values
     def fCP = (prod > 0 && cons > 0)
-    def fPB = (prod > cons && pac < 0)
+    def fPB = (prod > cons && bat < 0)
     def fPG = (prod > 0 && grid > 0)
-    def fCB = (pac > 0 && cons > 0)
+    def fCB = (bat > 0 && cons > 0)
     def fCG = (grid < 0 && cons > 0)
-    def fGB = (pac < 0 && prod == 0 && grid < 0)
+    def fGB = (bat < 0 && prod == 0 && grid < 0)
 
     def on = [CP: fCP, PB: fPB, PG: fPG, CB: fCB, CG: fCG, GB: fGB]
 
@@ -339,7 +339,7 @@ def updateChildDevices(data) {
     def prod = data.Production_W ?: 0
     def cons = data.Consumption_W ?: 0
     def grid = data.GridFeedIn_W ?: 0
-    def pac  = data.Pac_total_W ?: 0
+    def pac  = batteryFlow(data)
 
     child("Sonnen Total Production").parse([[name: "energy", value: prod / 1000, unit: "kW"]])
     child("Sonnen Total Consumption").parse([[name: "energy", value: cons / 1000, unit: "kW"]])
@@ -377,7 +377,7 @@ def componentRefresh(cd) {
 def estimateCharge(data) {
     def cap = state.FullChargeCapacity ?: 0        // Wh
     def usoc = data.USOC ?: 0                      // %
-    def pac = data.Pac_total_W ?: 0                // W (+ discharge, - charge)
+    def pac = batteryFlow(data)                    // W (+ discharge, - charge)
 
     // Wh currently stored
     def remainingWh = Math.round(cap * (usoc / 100))
@@ -449,6 +449,13 @@ def handleBackupBuffer(resp, data) {
 /* ---------------------------------------------------------
    HELPERS
 --------------------------------------------------------- */
+// Battery power with standby draw filtered out (about -25 W when idle):
+// anything within 50 W of zero counts as not charging or discharging
+def batteryFlow(data) {
+    def pac = data.Pac_total_W ?: 0
+    return (pac.abs() < 50) ? 0 : pac
+}
+
 def roundTo(n, places) {
     new BigDecimal(n.toString()).setScale(places, BigDecimal.ROUND_HALF_UP)
 }
